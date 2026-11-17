@@ -1,0 +1,45 @@
+{% load i18n %}
+{% if error_message %}
+<div data-chh-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "admin/compute_host_health/_retry.html" %}
+<script>chh.destroyChart('dist');</script>
+{% elif not total %}
+<p class="text-muted text-center" style="padding: 20px;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% trans "No host with a valid CPU value." %}</p>
+<script>chh.destroyChart('dist');</script>
+{% else %}
+<div class="chh-chart"><canvas id="chh-dist-canvas-{{ uid }}" role="img" aria-label="{% trans 'Number of hosts per CPU usage band' %}"></canvas></div>
+{% with data_id="chh-dist-data-"|add:uid %}{{ chart|json_script:data_id }}{% endwith %}
+{% if data_stale %}<p class="text-warning" style="margin: 6px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>{% endif %}
+<div class="chh-muted" style="margin-top: 8px;">
+  {% trans "List the busiest hosts of a band:" %}
+  <div class="btn-group btn-group-xs" role="group" aria-label="{% trans 'CPU usage bands' %}">
+    {% for band in bands %}
+    {# An empty band is aria-disabled, not disabled: a focused button that #}
+    {# empties on a refresh keeps the keyboard focus. #}
+    <button type="button" id="chh-band-{{ forloop.counter0 }}" class="btn btn-default{% if forloop.counter0 == selected_band %} active{% elif not band.count %} disabled{% endif %}"
+            onclick="if (this.getAttribute('aria-disabled') !== 'true') { chh.setTop('band', {{ forloop.counter0 }}); }"
+            aria-pressed="{% if forloop.counter0 == selected_band %}true{% else %}false{% endif %}"
+            {% if not band.count and forloop.counter0 != selected_band %}aria-disabled="true"{% endif %}>{{ band.label }} ({{ band.count }})</button>
+    {% endfor %}
+  </div>
+</div>
+<script>
+(function () {
+  var d = chh.readJson('chh-dist-data-{{ uid }}');
+  chh.replaceChart('dist', document.getElementById('chh-dist-canvas-{{ uid }}'), {
+    type: 'bar',
+    data: { labels: d.labels, datasets: [{ label: '{% filter escapejs %}{% trans "Hosts" %}{% endfilter %}', data: d.counts,
+      backgroundColor: d.levels.map(function (l) { return chh.colors[l]; }) }] },
+    options: {
+      maintainAspectRatio: false, animation: false,
+      onClick: function (e, els) { if (els.length) { chh.setTop('band', els[0].index); } },
+      onHover: function (e, els) { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) {
+        var pct = d.total ? Math.round(100 * c.parsed.y / d.total) : 0;
+        return c.parsed.y + ' {% filter escapejs %}{% trans "hosts" %}{% endfilter %} (' + pct + '%)'; } } } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+})();
+</script>
+{% endif %}

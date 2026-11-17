@@ -173,6 +173,31 @@ def get_cache_max_item_bytes():
     return value
 
 
+#: Default compute host health thresholds (percent, 15 minute averages).
+DEFAULT_COMPUTE_HOST_THRESHOLDS = {
+    "cpu_warning": 75,
+    "cpu_critical": 90,
+    "iowait_warning": 10,
+    "iowait_critical": 20,
+}
+
+
+def get_compute_host_thresholds():
+    """
+    Get the compute host health thresholds.
+
+    Defaults (DEFAULT_COMPUTE_HOST_THRESHOLDS) can be overridden per key with
+    ``GRIAN_PLUGIN['compute_host_thresholds']``; values are percentages from
+    0 to less than 100. See get_thresholds().
+
+    Raises:
+        ConfigurationError: If an override is unknown or out of range
+    """
+    return get_thresholds(
+        "compute_host_thresholds", DEFAULT_COMPUTE_HOST_THRESHOLDS, maximum=100
+    )
+
+
 def get_openstack_keystone_url():
     """Get OpenStack Keystone URL from settings."""
     url = getattr(settings, "OPENSTACK_KEYSTONE_URL", None)

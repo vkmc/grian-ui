@@ -199,3 +199,49 @@ class CacheMaxItemBytesTests(base.TestCase):
                 self._get,
                 cache_max_item_bytes=value,
             )
+
+
+class GetComputeHostThresholdsTests(base.TestCase):
+    def _get(self, overrides=None):
+        plugin = {"datasource": "fake"}
+        if overrides is not None:
+            plugin["compute_host_thresholds"] = overrides
+        with mock.patch(
+            "grian_ui.config._get_grian_plugin_config", return_value=plugin
+        ):
+            return config.get_compute_host_thresholds()
+
+    def test_defaults(self):
+        self.assertEqual(self._get(), config.DEFAULT_COMPUTE_HOST_THRESHOLDS)
+
+    def test_partial_override(self):
+        result = self._get({"cpu_warning": 80, "iowait_critical": 25.5})
+        self.assertEqual(result["cpu_warning"], 80)
+        self.assertEqual(result["iowait_critical"], 25.5)
+        self.assertEqual(result["cpu_critical"], 90)
+
+    def test_unknown_key(self):
+        self.assertRaisesRegex(
+            config.ConfigurationError,
+            r"Unknown key 'ram' in GRIAN_PLUGIN\['compute_host_thresholds'\]",
+            self._get,
+            {"ram": 80},
+        )
+
+    def test_percentages_below_100(self):
+        self.assertRaisesRegex(
+            config.ConfigurationError,
+            r"GRIAN_PLUGIN\['compute_host_thresholds'\]\['cpu_warning'\] "
+            "must be a number from 0 to less than 100, got 100",
+            self._get,
+            {"cpu_warning": 100},
+        )
+
+    def test_warning_above_critical(self):
+        for key in ("cpu_warning", "iowait_warning"):
+            self.assertRaisesRegex(
+                config.ConfigurationError,
+                "must not be greater than",
+                self._get,
+                {key: 95},
+            )

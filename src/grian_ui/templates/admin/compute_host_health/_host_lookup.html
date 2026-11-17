@@ -1,0 +1,79 @@
+{% load i18n %}
+{% if not name %}
+<script>chh.destroyChart('host');</script>
+{% else %}
+{# What a screen reader announces for a lookup the user started. #}
+<span hidden data-chh-announce{% if loading and error_message %} data-chh-loading{% endif %}>{% if announce %}{{ announce }}{% elif error_message %}{{ error_message }}{% endif %}</span>
+{# Re-fetch this host on the page's refresh cycle while it is displayed. #}
+<div hx-get="{% url 'horizon:admin:compute_host_health:host' %}?name={{ name|urlencode }}"
+     hx-include="#chh-range" data-chh-range="{{ range_key }}"
+     hx-trigger="every {{ refresh_seconds }}s [document.visibilityState === 'visible'], chh-refresh from:body, chh-range from:body, chh-retry"
+     hx-sync="#chh-lookup-panel:queue last"
+     hx-target="#chh-lookup-result" hx-swap="innerHTML"></div>
+{% if loading and not error_message %}{% include "admin/compute_host_health/_retry.html" %}{% endif %}
+{% if data_stale and not error_message %}<p class="text-warning" style="margin: 6px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>{% endif %}
+{% if error_message %}
+<div data-chh-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 12px 0 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "admin/compute_host_health/_retry.html" %}
+<script>chh.destroyChart('host');</script>
+{% elif ambiguous %}
+<p class="text-muted" style="margin: 12px 0 0;"><i class="fa fa-question-circle" aria-hidden="true"></i>
+  {% blocktrans with names=ambiguous|join:", " %}Several hosts match <strong>{{ name }}</strong> in different cases ({{ names }}): type the exact name, or pick one from the suggestions.{% endblocktrans %}</p>
+<script>chh.destroyChart('host');</script>
+{% elif not found %}
+<p class="text-muted" style="margin: 12px 0 0;"><i class="fa fa-question-circle" aria-hidden="true"></i>
+  {% blocktrans with lookback=stale_lookback %}No compute host named <strong>{{ name }}</strong> has reported CPU metrics in the last {{ lookback }}.{% endblocktrans %}
+  {% if stale_list_incomplete %}{% trans "(The list of hosts that stopped reporting could not be loaded, so a host silent for a while may be missing.)" %}{% endif %}</p>
+<script>chh.destroyChart('host');</script>
+{% elif status.key == "stale" %}
+<div style="margin-top: 12px;">
+  <h4>{{ name }} {% include "admin/compute_host_health/_status_badge.html" %}</h4>
+  <p>{% blocktrans with age=last_seen_age %}This host stopped reporting. Last seen about {{ age }}.{% endblocktrans %}</p>
+  <p class="chh-muted">{% trans "Check that nova-compute is running on the host and that it can reach the message bus." %}</p>
+</div>
+<script>chh.destroyChart('host');</script>
+{% else %}
+<div class="row" style="margin-top: 12px;">
+  <div class="col-md-5">
+    <h4 style="margin-top: 0;">{{ name }} {% include "admin/compute_host_health/_status_badge.html" %}</h4>
+    <table class="table table-condensed" style="margin-bottom: 0;">
+      <tr><th style="width: 45%;">{% trans "CPU usage (latest)" %}</th><td>{% include "admin/compute_host_health/_cpu_bar.html" %}</td></tr>
+      <tr><th>{% trans "Average CPU (15m)" %}</th><td>{% if host.cpu_avg is None %}{% trans "n/a" %}{% else %}{{ host.cpu_avg|floatformat:"-1" }}%{% endif %}</td></tr>
+      <tr><th>{% trans "Average I/O wait (15m)" %}</th><td>{% if host.iowait_avg is None %}{% trans "n/a" %}{% else %}{{ host.iowait_avg|floatformat:"-1" }}%{% endif %}</td></tr>
+      {# while the breakdown loads, "n/a" would read as "no data" #}
+      <tr><th>{% trans "User / kernel / I/O wait / idle" %}</th><td>{% if details_loading %}<span class="chh-age">{% trans "loading…" %}</span>{% elif detail.cpu is None %}{% trans "n/a" %}{% else %}{{ meters.user }} / {{ meters.kernel }} / {{ meters.iowait }} / {{ meters.idle }}{% endif %}</td></tr>
+      <tr><th>{% trans "Frequency" %}</th><td>{% if detail.frequency %}{{ detail.frequency|floatformat:0 }} MHz{% elif details_loading %}<span class="chh-age">{% trans "loading…" %}</span>{% else %}{% trans "n/a" %}{% endif %}</td></tr>
+      <tr><th>{% trans "Last seen" %}</th><td>{% if last_seen_age %}{{ last_seen_age }}{% elif details_loading %}<span class="chh-age">{% trans "loading…" %}</span>{% else %}{% trans "n/a" %}{% endif %}</td></tr>
+      {% if status.reasons %}<tr><th>{% trans "Why" %}</th><td>{{ status.reasons|join:", " }}</td></tr>{% endif %}
+    </table>
+  </div>
+  <div class="col-md-7">
+    {% for note in partial_notes %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {{ note }}</p>{% endfor %}
+    <p class="sr-only" id="chh-host-summary-{{ uid }}">{% if trend_summary %}{% blocktrans with latest=trend_summary.latest min=trend_summary.min max=trend_summary.max %}Latest {{ latest }}%, lowest {{ min }}%, highest {{ max }}% in the range.{% endblocktrans %}{% endif %}</p>
+    <div style="position: relative; height: 220px;"><canvas id="chh-host-canvas-{{ uid }}" role="img" aria-label="{% trans 'CPU usage of the host over time' %}" aria-describedby="chh-host-summary-{{ uid }}"></canvas></div>
+  </div>
+</div>
+{% with data_id="chh-host-data-"|add:uid %}{{ chart|json_script:data_id }}{% endwith %}
+<script>
+(function () {
+  var d = chh.readJson('chh-host-data-{{ uid }}');
+  var labels = d.host.map(function (p) { return chh.formatTime(p[0], d.range); });
+  var median = {};
+  d.fleet_median.forEach(function (p) { median[p[0]] = p[1]; });
+  var n = labels.length;
+  chh.replaceChart('host', document.getElementById('chh-host-canvas-{{ uid }}'), {
+    type: 'line',
+    data: { labels: labels, datasets: [
+      { label: '{% filter escapejs %}{% blocktrans with host="%(host)s" %}{{ host }} CPU usage{% endblocktrans %}{% endfilter %}'.split('%(host)s').join(d.name), data: d.host.map(function (p) { return p[1]; }), borderColor: chh.colors.info, backgroundColor: 'rgba(51,122,183,.12)', fill: 'origin', pointRadius: 0, tension: .25, borderWidth: 2 },
+      { label: '{% filter escapejs %}{% trans "Fleet median" %}{% endfilter %}', data: d.host.map(function (p) { return median[p[0]] === undefined ? null : median[p[0]]; }), borderColor: '#666', borderDash: [4, 3], pointRadius: 0, borderWidth: 1, fill: false },
+      chh.thresholdLine(d.critical, chh.colors.critical, '{% filter escapejs %}{% trans "Critical" %}{% endfilter %}', n),
+      chh.thresholdLine(d.warning, chh.colors.warning, '{% filter escapejs %}{% trans "Warning" %}{% endfilter %}', n)
+    ] },
+    options: { maintainAspectRatio: false, animation: false, spanGaps: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } },
+      scales: { y: { min: 0, max: 100, ticks: { callback: function (v) { return v + '%'; } } }, x: { ticks: { maxTicksLimit: 8 } } } }
+  });
+})();
+</script>
+{% endif %}
+{% endif %}
