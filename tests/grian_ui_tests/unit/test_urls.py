@@ -16,12 +16,10 @@ class TestInfrastructureTests(base.TestCase):
             "/dashboard/admin/volume_metrics/",
         )
         self.assertEqual(
-            reverse("horizon:admin:volume_metrics:capacity_prediction"),
-            "/dashboard/admin/volume_metrics/capacity-prediction/",
+            reverse("horizon:admin:volume_metrics:pools"),
+            "/dashboard/admin/volume_metrics/pools/",
         )
 
     def test_panel_templates_are_found(self):
-        template = get_template(
-            "admin/volume_metrics/_capacity_prediction.html"
-        )
+        template = get_template("admin/volume_metrics/_pools.html")
         self.assertIsNotNone(template)

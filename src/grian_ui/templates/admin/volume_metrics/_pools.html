@@ -1,0 +1,21 @@
+{% load i18n %}
+{% if error_message %}
+<div class="panel-body">{% include "admin/volume_metrics/_error.html" %}</div>
+{% elif not rows %}
+<div class="vm-empty" data-vm-nodata><i class="fa fa-server" aria-hidden="true"></i>{% trans "No storage pools reported in the last 24 hours." %}</div>
+<div class="panel-footer vm-muted">{% include "admin/volume_metrics/_notes.html" %}</div>
+{% else %}
+<div class="table-responsive"><table class="table table-condensed vm-table">
+  <caption class="sr-only">{% if sort == "full" %}{% trans "Pools, fullest first" %}{% elif sort == "stale" %}{% trans "Pools, stale first" %}{% else %}{% trans "Pools, soonest full first" %}{% endif %}</caption>
+  {% include "admin/volume_metrics/_pool_head.html" %}
+  <tbody>
+  {% for row in rows %}{% include "admin/volume_metrics/_pool_row.html" %}{% endfor %}
+  </tbody>
+</table></div>
+<div class="panel-footer vm-muted">
+  <i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans count n=total %}{{ n }} pool.{% plural %}{{ n }} pools.{% endblocktrans %}
+  {% if total > limit %}{% blocktrans with n=limit %}Top {{ n }} shown; use the look-up below for the others.{% endblocktrans %}{% endif %}
+  {% trans "Physical is space really used; virtual is what thin provisioning promised, against the over-subscription limit. The forecast says when free or virtual free capacity reaches zero at the 7-day trend, whichever comes first." %}
+  {% include "admin/volume_metrics/_notes.html" %}
+</div>
+{% endif %}

@@ -1,0 +1,52 @@
+{% load i18n %}
+{% if error_message %}
+{% include "admin/volume_metrics/_error.html" %}
+<script>vm.destroyChart('capacity');</script>
+{% elif not has_data %}
+<p class="text-muted text-center" data-vm-nodata style="padding: 20px;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% if view == "pools" %}{% trans "No pool reported capacity in the selected range." %}{% else %}{% trans "No capacity reported in the selected range." %}{% endif %}</p>
+{% include "admin/volume_metrics/_notes.html" %}
+<script>vm.destroyChart('capacity');</script>
+{% else %}
+<div class="vm-chart"><canvas id="vm-capacity-canvas-{{ uid }}" role="img" aria-label="{% if view == 'pools' %}{% trans 'Physical use of the fullest pools over time' %}{% else %}{% trans 'Allocated, provisioned and total capacity over time' %}{% endif %}"></canvas></div>
+{% with data_id="vm-capacity-data-"|add:uid %}{{ chart|json_script:data_id }}{% endwith %}
+<p class="vm-muted" style="margin: 6px 0 0;"><i class="fa fa-info-circle" aria-hidden="true"></i>
+  {% if view == "pools" %}{% blocktrans with w=thresholds.physical_warning c=thresholds.physical_critical %}Physical use (allocated ÷ total) of the fullest pools reporting now, with the {{ w }}% and {{ c }}% thresholds.{% endblocktrans %}{% else %}{% trans "Whole cloud, pools reporting at each point. Provisioned above total is normal with thin provisioning: watch the virtual use in the pools table." %}{% endif %}
+  {% trans "Gaps mean no data." %}</p>
+{% include "admin/volume_metrics/_notes.html" %}
+<script>
+(function () {
+  var d = vm.readJson('vm-capacity-data-{{ uid }}');
+  var range = '{{ range_key|escapejs }}';
+  var labels = d.labels.map(function (ts) { return vm.formatTick(ts, range); });
+  var names = {
+    allocated: '{% filter escapejs %}{% trans "Allocated" %}{% endfilter %}',
+    provisioned: '{% filter escapejs %}{% trans "Provisioned" %}{% endfilter %}',
+    total: '{% filter escapejs %}{% trans "Total (physical)" %}{% endfilter %}'
+  };
+  var datasets = d.series.map(function (s, i) {
+    var set = { label: d.view === 'pools' ? s.name : names[s.name], data: s.values, borderColor: vm.colors[i % vm.colors.length],
+                borderWidth: 2, pointRadius: 0, tension: .2, fill: false };
+    if (d.view !== 'pools' && s.name === 'allocated') { set.fill = 'origin'; set.backgroundColor = 'rgba(51,122,183,.12)'; }
+    if (d.view !== 'pools' && s.name === 'total') { set.borderColor = '#595959'; set.borderDash = [6, 3]; set.borderWidth = 1; }
+    return set;
+  });
+  var unit = d.view === 'pools' ? '%' : ' GiB';
+  if (d.view === 'pools') {
+    [['{% filter escapejs %}{% trans "Warning" %}{% endfilter %}', d.warning, '#a35c00'], ['{% filter escapejs %}{% trans "Critical" %}{% endfilter %}', d.critical, '#b52b27']].forEach(function (t) {
+      datasets.push({ label: t[0] + ' ' + t[1] + '%', data: d.labels.map(function () { return t[1]; }), borderColor: t[2], borderDash: [4, 4], borderWidth: 1, pointRadius: 0, fill: false });
+    });
+  }
+  vm.replaceChart('capacity', document.getElementById('vm-capacity-canvas-{{ uid }}'), {
+    type: 'line',
+    data: { labels: labels, datasets: datasets },
+    options: {
+      maintainAspectRatio: false, animation: false, spanGaps: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } },
+        tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + (c.parsed.y === null ? '–' : c.parsed.y.toLocaleString() + unit); } } } },
+      scales: { y: { min: 0, max: d.view === 'pools' ? 100 : undefined, ticks: { callback: function (v) { return v.toLocaleString() + unit; } } },
+                x: { ticks: { maxTicksLimit: 8 } } }
+    }
+  });
+})();
+</script>
+{% endif %}

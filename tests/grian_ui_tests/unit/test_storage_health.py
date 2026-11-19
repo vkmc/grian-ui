@@ -409,3 +409,181 @@ class InventoryTests(base.TestCase):
         self.assertIsInstance(
             inventory, storage_inventory.CinderStorageInventory
         )
+
+
+def _service(binary, host, up=True):
+    return {
+        "resource": f"{binary}@{host}",
+        "binary": binary,
+        "host": host,
+        "up": up,
+    }
+
+
+class RangesTests(base.TestCase):
+    def test_get_range(self):
+        self.assertEqual(
+            storage_health.get_range("24h"), ("24h", "24h", "15m")
+        )
+        self.assertEqual(storage_health.get_range("bad"), ("7d", "7d", "1h"))
+
+    def test_grid_and_fill(self):
+        timestamps = storage_health.grid("1h", "15m", 3600 * 10 + 100)
+        self.assertEqual(timestamps, [3600 * 9 + 900 * i for i in range(1, 5)])
+        values = storage_health.fill(
+            [[timestamps[0] + 1, 1.0], [timestamps[2], 3.0]], timestamps
+        )
+        self.assertEqual(values, [1.0, None, 3.0, None])
+        self.assertEqual(storage_health.fill([], [5]), [None])
+
+
+class ServiceRowsTests(base.TestCase):
+    def test_outage(self):
+        now = 1_800_000_000
+        timestamps = storage_health.grid(*storage_health.HISTORY, now)
+        down = _service("cinder-volume", "h@nfs", up=False)
+        up = _service("cinder-scheduler", "h")
+        silent = _service("cinder-volume", "h@lvm", up=None)
+        history = {
+            down["resource"]: [
+                [ts, 0.0 if i >= 90 else 1.0]
+                for i, ts in enumerate(timestamps)
+            ],
+            up["resource"]: [[ts, 1.0] for ts in timestamps[48:]],
+        }
+        rows = storage_health.service_rows([up, silent, down], history, now)
+        self.assertEqual(
+            [r["resource"] for r in rows],
+            [down["resource"], silent["resource"], up["resource"]],
+        )
+        self.assertEqual(rows[0]["down_since"], timestamps[90])
+        self.assertAlmostEqual(rows[0]["up_percent"], 90 / 96 * 100)
+        self.assertEqual(rows[2]["strip"][:48], [None] * 48)
+        self.assertEqual(rows[2]["up_percent"], 100.0)
+        self.assertIsNone(rows[1]["up_percent"])
+        self.assertIsNone(rows[2]["down_since"])
+
+    def test_without_history(self):
+        rows = storage_health.service_rows(
+            [_service("cinder-volume", "h@b", up=False)], None, 0
+        )
+        self.assertIsNone(rows[0]["strip"])
+        self.assertIsNone(rows[0]["down_since"])
+
+
+class BackendRowsTests(base.TestCase):
+    def test_rows(self):
+        pools = [
+            _pool(name="h1@lvm#a", total=100.0, provisioned=150.0),
+            _pool(name="h1@lvm#b", total=100.0, provisioned=50.0),
+            _pool(name="h2@nfs#c", total=10.0, provisioned=5.0, stale=True),
+        ]
+        services = [
+            _service("cinder-volume", "h1@lvm"),
+            _service("cinder-volume", "h2@nfs", up=False),
+            _service("cinder-scheduler", "h1@lvm", up=False),
+        ]
+        rows, total = storage_health.backend_rows(pools, services)
+        self.assertEqual(total, 2)
+        self.assertEqual([r["name"] for r in rows], ["h2@nfs", "h1@lvm"])
+        self.assertTrue(rows[0]["service_down"])
+        self.assertEqual(rows[0]["stale"], 1)
+        self.assertFalse(rows[1]["service_down"])
+        self.assertEqual(rows[1]["pools"], 2)
+        self.assertEqual(rows[1]["oversubscription"], 1.0)
+
+    def test_limit(self):
+        pools = [_pool(name=f"h@b{i}#p") for i in range(12)]
+        rows, total = storage_health.backend_rows(pools, [])
+        self.assertEqual(len(rows), storage_health.BACKEND_LIMIT)
+        self.assertEqual(total, 12)
+
+
+class PoolTableTests(base.TestCase):
+    def rows(self):
+        pools = [
+            _pool(name="soon", allocated=20.0),
+            _pool(name="full", allocated=85.0),
+            _pool(name="stale-old", stale=True, last_seen=NOW - 7200),
+            _pool(name="stale-new", stale=True, last_seen=NOW - 900),
+            _pool(name="quiet", allocated=5.0),
+        ]
+        predictions = [
+            dict(_prediction(days=3), name="soon"),
+            dict(_prediction(days=40), name="full"),
+        ]
+        return storage_health.evaluate_pools(pools, predictions, THRESHOLDS)
+
+    def test_sorts(self):
+        rows = self.rows()
+
+        def order(by):
+            return [r["name"] for r in storage_health.sort_pools(rows, by)]
+
+        self.assertEqual(
+            order("soon"), ["soon", "full", "stale-new", "stale-old", "quiet"]
+        )
+        self.assertEqual(order("full")[0], "full")
+        self.assertEqual(order("stale")[:2], ["stale-old", "stale-new"])
+
+    def test_find_and_suggest(self):
+        rows = self.rows()
+        self.assertEqual(
+            storage_health.find_pool(rows, " FULL ")["name"], "full"
+        )
+        self.assertIsNone(storage_health.find_pool(rows, ""))
+        self.assertIsNone(storage_health.find_pool(rows, "nope"))
+        self.assertEqual(
+            storage_health.suggest_pools(rows, "STALE"),
+            ["stale-new", "stale-old"],
+        )
+        self.assertEqual(
+            len(storage_health.suggest_pools(rows, "", limit=2)), 2
+        )
+
+    def test_fullest_pools(self):
+        self.assertEqual(
+            storage_health.fullest_pools(self.rows(), limit=2),
+            ["full", "soon"],
+        )
+
+
+class ProjectUsageTests(base.TestCase):
+    def test_usage(self):
+        volumes = [
+            _volume("a", size=10, project_id="p1"),
+            _volume("b", size=30, project_id="p2"),
+            _volume("c", size=None, project_id="p2"),
+        ]
+        snapshots = [dict(_snapshot("s", "a", DAY), size=60)]
+        usage = storage_health.project_usage(volumes, snapshots, limit=1)
+        self.assertEqual(usage["total"], 2)
+        self.assertEqual(usage["gib"], 100)
+        row = usage["rows"][0]
+        self.assertEqual(row["project_id"], "p1")
+        self.assertEqual(row["volumes"], 1)
+        self.assertEqual(row["snapshot_gib"], 60)
+        self.assertEqual(row["share"], 70.0)
+        self.assertEqual(storage_health.project_usage([], [])["rows"], [])
+
+
+class ServiceVerdictTests(base.TestCase):
+    def test_service_down_comes_first(self):
+        rows = storage_health.evaluate_pools(
+            [_pool(allocated=99.0)], [_prediction(days=20)], THRESHOLDS
+        )
+        summary = storage_health.summarize(
+            rows,
+            None,
+            THRESHOLDS,
+            [_service("cinder-volume", "h@b", up=None), _service("x", "y")],
+        )
+        self.assertEqual(summary["verdict"]["key"], "service_down")
+        self.assertEqual(summary["verdict"]["level"], "critical")
+        self.assertEqual(summary["verdict"]["names"], ["cinder-volume on h@b"])
+        self.assertEqual(summary["services_down"], 1)
+        self.assertEqual(summary["services_total"], 2)
+        self.assertEqual(
+            summary["soonest"],
+            {"name": "host@lvm#pool", "days": 20, "limiting": "virtual"},
+        )

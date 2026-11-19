@@ -1,0 +1,29 @@
+{% load i18n %}
+{% if error_message %}
+<div class="panel-body">{% include "admin/volume_metrics/_error.html" %}</div>
+{% elif not rows %}
+<div class="vm-empty"><i class="fa fa-users" aria-hidden="true"></i>{% trans "No volumes or snapshots." %}</div>
+<div class="panel-footer vm-muted">{% include "admin/volume_metrics/_notes.html" %}</div>
+{% else %}
+<div class="table-responsive"><table class="table table-condensed vm-table">
+  <caption class="sr-only">{% trans "Usage by project, largest first" %}</caption>
+  <thead><tr><th scope="col">{% trans "Project" %}</th><th scope="col" class="text-right">{% trans "Volumes" %}</th><th scope="col" class="text-right">{% trans "Volume GiB" %}</th><th scope="col" class="text-right">{% trans "Snapshots" %}</th><th scope="col" class="text-right">{% trans "Snapshot GiB" %}</th><th scope="col">{% trans "Share" %}</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr>
+    <td>{% if row.project_name and volumes_url %}<form method="post" action="{{ volumes_url }}" style="display: inline;">{% csrf_token %}<input type="hidden" name="volumes__volumes_admin_filter__q_field" value="project"><input type="hidden" name="volumes__volumes_admin_filter__q" value="{{ row.project_name }}"><button type="submit" class="vm-linkbtn" title="{% trans 'Open its volumes in Admin > Volume > Volumes' %}">{{ row.project_name }}</button></form>{% elif row.project_name %}<strong>{{ row.project_name }}</strong>{% else %}{{ row.project_id|default:"–" }}{% endif %}</td>
+    <td class="text-right">{{ row.volumes }}</td>
+    <td class="text-right">{{ row.volume_gib }}</td>
+    <td class="text-right">{{ row.snapshots }}</td>
+    <td class="text-right">{{ row.snapshot_gib }}</td>
+    <td><span class="vm-ratio" aria-hidden="true"><span style="width: {{ row.share_width }}%;"></span></span>{{ row.share|floatformat:0 }}%</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<div class="panel-footer vm-muted">
+  {% trans "Share of all volume and snapshot GiB. Click a project to open its volumes (Admin > Volume > Volumes, filtered by project)." %}
+  {% if total > limit %}{% blocktrans with n=limit total=total %}{{ n }} of {{ total }} projects shown.{% endblocktrans %}{% endif %}
+  {% include "admin/volume_metrics/_notes.html" %}
+</div>
+{% endif %}

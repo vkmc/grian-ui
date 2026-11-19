@@ -15,6 +15,7 @@ from keystoneauth1.identity import v3
 from observabilityclient.utils import metric_utils as obs_client_utils
 
 from grian_ui import config
+from grian_ui.datasource import prometheus_storage
 from grian_ui.datasource.api import DatasourceClient
 
 
@@ -376,6 +377,28 @@ class PrometheusTelemetryClient(DatasourceClient):
                     points.append([float(timestamp), sample])
             series.append((result.get("metric", {}), points))
         return series
+
+    # Storage Health (queries in grian_ui.datasource.prometheus_storage)
+
+    def get_volume_services(self) -> list:
+        """Get the current status of every Cinder service (one query)."""
+        return prometheus_storage.get_services(self)
+
+    def get_volume_service_history(self, at: float = None) -> dict:
+        """Get the 24-hour Cinder service history (one query)."""
+        return prometheus_storage.get_service_history(self, at)
+
+    def get_storage_capacity_trend(
+        self, range_key: str, pools: list = None, at: float = None
+    ) -> dict:
+        """Get the capacity trend (one query)."""
+        return prometheus_storage.get_capacity_trend(
+            self, range_key, pools, at
+        )
+
+    def get_storage_images(self) -> dict:
+        """Get the image and backup totals (one query)."""
+        return prometheus_storage.get_images_and_backups(self)
 
 
 def get_client(request) -> DatasourceClient:

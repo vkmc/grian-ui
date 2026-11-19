@@ -55,8 +55,8 @@ class FakeTelemetryClientTests(base.TestCase):
 
     def test_get_storage_pools_values(self):
         pools = self.client.get_storage_pools()
-        self.assertEqual(pools[0]["name"], "storage-pool-01")
-        self.assertEqual(pools[1]["name"], "storage-pool-02")
+        self.assertEqual(pools[0]["name"], "ctl-01@lvm#storage-pool-01")
+        self.assertEqual(pools[1]["name"], "ctl-01@lvm#storage-pool-02")
         self.assertEqual(pools[0]["total"], 5120.0)
         self.assertEqual([p["stale"] for p in pools], [False, False, True])
 

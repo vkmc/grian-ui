@@ -17,6 +17,9 @@ Reading the page
   volumes and snapshots from the Block Storage API are refreshed every 2
   minutes and the forecasts every 5 minutes. Each section says when its
   data was fetched, in your browser's time zone.
+* The **range buttons** (24h, 7d, 14d) only change the capacity chart.
+  Problems always use the last 10 minutes (the staleness window, which the
+  operator can change).
 * When a source cannot be read, the page keeps showing the last good data
   with its age ("Could not be refreshed: showing the last data received,
   from 4 min ago") and retries at the next refresh. When the Block Storage
@@ -43,6 +46,11 @@ Verdict
    * - Storage is healthy
      - Nothing. While the pools have less than 7 days of history, it says
        so: forecasts are not available yet.
+   * - Cinder service down: cinder-volume on *host@backend*
+     - Volume operations on that backend fail or get stuck and its pools
+       stop reporting; the verdict says how many. Check
+       ``openstack volume service list`` and the service's log, and restart
+       it. The attention list shows which projects are affected.
    * - *N* pools nearly full
      - Add capacity or move volumes away. When the virtual use is the
        limit (thin provisioning), raise the over-subscription ratio only if
@@ -90,8 +98,21 @@ clean-up rule yet. Click a name to open the volume or snapshot in
 **Admin > Volume**.
 
 
-Pools and forecasts
-===================
+Capacity over time
+==================
+
+*Whole cloud*: allocated, provisioned and total capacity over the range.
+Provisioned above total is normal with thin provisioning. *Fullest pools*:
+physical use of the 5 fullest pools, with the 75% and 90% lines.
+
+
+Pools (top 10, plus look-up)
+============================
+
+One row per pool; this table replaces the old Storage Pools, Capacity
+Forecast and Detailed Pool Information panels. Sort it by *Soonest full*,
+*Fullest* or *Stale first*, and use the look-up box (with suggestions) for
+any pool outside the top 10.
 
 * **Physical** use is space really used (allocated ÷ total). **Virtual**
   use is what thin provisioning promised, against the over-subscription
@@ -102,7 +123,23 @@ Pools and forecasts
   at the 7-day trend, whichever comes first, and which one ("Full in 24
   days (virtual)"). It needs 7 days of history.
 * A pool without a report for 10 minutes (configurable) is **Stale**:
-  its numbers are frozen at the last report, shown with its time.
+  its numbers are frozen at the last report, and *Last report* turns red.
+
+
+Cinder services, backends, projects, images
+===========================================
+
+* **Cinder services**: each scheduler and volume service with a 24-hour
+  strip (one mark per 15 minutes: green up, red down, grey no report) and
+  the share of time up.
+* **Backends**: pools summed per backend, with over-subscription
+  (provisioned ÷ total). A backend whose volume service is down is flagged.
+* **Usage by project** (top 10): volumes and snapshots per project. Click a
+  project to open its volumes in **Admin > Volume > Volumes**, filtered by
+  that project.
+* **Images and backups**: image count and store size, images downloaded in
+  24 hours, and volume backups ("not deployed" without the
+  ``cinder-backup`` service).
 
 
 Common tasks
@@ -113,5 +150,9 @@ Common tasks
   physical space allows it, or add capacity.
 * **A pool is stale**: check ``openstack volume service list``; restart
   or repair the ``cinder-volume`` service of that backend.
+* **A volume service is down**: its pools turn stale and volume
+  operations on that backend fail; the attention list shows which projects
+  are affected.
 * **Clean-up before buying capacity**: work through the clean-up rows of
-  the attention list with the owning projects.
+  the attention list with the owning projects, and check *Usage by project*
+  for the largest consumers.

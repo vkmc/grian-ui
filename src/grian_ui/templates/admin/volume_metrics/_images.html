@@ -1,0 +1,12 @@
+{% load i18n %}
+{% if error_message %}
+{% include "admin/volume_metrics/_error.html" %}
+{% else %}
+<table class="vm-kv">
+  <tr><td>{% trans "Images" %}</td><td>{% if images.images is not None %}<strong>{{ images.images }}</strong>{% if images.image_projects %} {% blocktrans count n=images.image_projects %}in {{ n }} project{% plural %}in {{ n }} projects{% endblocktrans %}{% endif %}{% else %}<span class="text-muted">{% trans "none reported" %}</span>{% endif %}</td></tr>
+  <tr><td>{% trans "Image store" %}</td><td>{% if images.image_bytes is not None %}<strong>{{ images.image_bytes|filesizeformat }}</strong>{% else %}–{% endif %}</td></tr>
+  <tr><td>{% trans "Images downloaded, 24 h" %}</td><td>{% if images.images_downloaded is not None %}<strong>{{ images.images_downloaded }}</strong>{% else %}<span class="text-muted">{% trans "none recorded" %}</span>{% endif %}</td></tr>
+  <tr><td>{% trans "Volume backups" %}</td><td>{% if images.backups is not None %}<strong>{{ images.backups }}</strong> | {% blocktrans with gib=images.backup_gib|floatformat:"-1" %}{{ gib }} GiB{% endblocktrans %}{% elif backup_service %}<span class="text-muted">{% trans "none reported" %}</span>{% else %}<span class="text-muted">{% trans "Backup service (cinder-backup) not deployed" %}</span>{% endif %}</td></tr>
+</table>
+{% include "admin/volume_metrics/_notes.html" %}
+{% endif %}
