@@ -1,0 +1,12 @@
+---
+features:
+  - |
+    Add the Top Consumers dashboard under Admin > Telemetry. It ranks the
+    projects and instances using the most CPU, memory, disk I/O and network,
+    with their share of the total, what their running instances hold
+    (vCPUs, flavor RAM) and the top five over 1 hour to 7 days. Data comes
+    from the polled Ceilometer instance meters; project names come from the
+    Identity service, read at most every 5 minutes per region. Every panel
+    renders a bounded amount of data. The busy and idle thresholds of the
+    used ÷ allocated column can be configured with
+    ``GRIAN_PLUGIN['top_consumers_thresholds']``.

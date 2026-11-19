@@ -99,6 +99,35 @@ class FakeTelemetryClient(DatasourceClient):
             },
         ]
 
+    # Top consumers (sample data in fake_top_consumers) ------------------
+
+    def get_top_consumers_projects(self) -> dict:
+        from grian_ui.datasource import fake_top_consumers
+
+        return fake_top_consumers.get_projects()
+
+    def get_top_consumers_instances(
+        self, resource: str, project_id: str = None, limit: int = 10
+    ) -> list:
+        from grian_ui.datasource import fake_top_consumers
+
+        return fake_top_consumers.get_instances(resource, project_id, limit)
+
+    def get_top_consumers_trend(
+        self,
+        resource: str,
+        by: str,
+        keys: list,
+        project_id: str = None,
+        range_key: str = "24h",
+        at: float = None,
+    ) -> dict:
+        from grian_ui.datasource import fake_top_consumers
+
+        return fake_top_consumers.get_trend(
+            resource, by, keys, project_id, range_key, at
+        )
+
 
 def get_client(request=None) -> DatasourceClient:
     """

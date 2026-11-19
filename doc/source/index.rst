@@ -16,3 +16,5 @@ documentation for details.
    :caption: Contents:
 
    admin-volume-metrics
+   admin-top-consumers
+   user-top-consumers
