@@ -11,9 +11,9 @@ urlpatterns = [
         name="metrics_update",
     ),
     re_path(
-        r"^chart-update/$",
-        views.ChartUpdateView.as_view(),
-        name="chart_update",
+        r"^attention/$",
+        views.AttentionView.as_view(),
+        name="attention",
     ),
     re_path(
         r"^capacity-prediction/$",

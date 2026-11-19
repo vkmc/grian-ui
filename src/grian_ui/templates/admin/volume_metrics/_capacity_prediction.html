@@ -22,7 +22,7 @@
           </thead>
           <tbody>
             {% for pred in predictions %}
-            <tr class="{% if pred.will_run_out and pred.days_until_full <= 30 %}danger{% endif %}">
+            <tr class="{% if pred.will_run_out and pred.days_until_full <= thresholds.forecast_critical_days %}danger{% elif pred.will_run_out and pred.days_until_full <= thresholds.forecast_warning_days %}warning{% endif %}">
               <td><strong>{{ pred.name }}</strong></td>
               <td class="text-right">{% if pred.current_free is not None %}{{ pred.current_free|floatformat:2 }}{% else %}<span class="text-muted">{% trans "N/A" %}</span>{% endif %}</td>
               <td class="text-right">{% if pred.current_virtual_free is not None %}{{ pred.current_virtual_free|floatformat:2 }}{% else %}<span class="text-muted">{% trans "N/A" %}</span>{% endif %}</td>
@@ -32,13 +32,13 @@
                     <i class="fa fa-question"></i>
                     {% blocktrans with days=pred.history_days %}Insufficient data ({{ days }} of 7 days){% endblocktrans %}
                   </span>
-                {% elif pred.will_run_out and pred.days_until_full <= 30 %}
-                  <span class="label label-danger">
+                {% elif pred.will_run_out and pred.days_until_full <= thresholds.forecast_warning_days %}
+                  <span class="label {% if pred.days_until_full <= thresholds.forecast_critical_days %}label-danger{% else %}label-warning{% endif %}">
                     <i class="fa fa-exclamation-triangle"></i>
                     {% if pred.limiting == "virtual" %}{% blocktrans with days=pred.days_until_full %}Full in {{ days }} days (virtual){% endblocktrans %}{% else %}{% blocktrans with days=pred.days_until_full %}Full in {{ days }} days (physical){% endblocktrans %}{% endif %}
                   </span>
                 {% elif pred.will_run_out %}
-                  <span class="label label-warning">
+                  <span class="label label-default">
                     <i class="fa fa-arrow-down"></i>
                     {% if pred.limiting == "virtual" %}{% blocktrans with days=pred.days_until_full %}Declining: full in {{ days }} days (virtual){% endblocktrans %}{% else %}{% blocktrans with days=pred.days_until_full %}Declining: full in {{ days }} days (physical){% endblocktrans %}{% endif %}
                   </span>

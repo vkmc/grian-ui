@@ -1,0 +1,36 @@
+{% load i18n %}
+{% if error_message %}
+<div class="panel-body">{% include "admin/volume_metrics/_error.html" %}</div>
+{% elif not rows %}
+<div class="vm-empty"><i class="fa fa-check-circle text-success" aria-hidden="true"></i>{% trans "No volume or snapshot in an error or stuck state, and nothing to clean up." %}</div>
+<div class="panel-footer vm-muted">
+  {% if attention.unattached_soon %}{% trans "Not listed yet:" %} {% for v in attention.unattached_soon %}{% blocktrans with name=v.name days=v.days %}{{ name }} (unattached {{ days }} days){% endblocktrans %}{% if not forloop.last %}, {% endif %}{% endfor %}.{% endif %}
+  {% include "admin/volume_metrics/_notes.html" %}
+</div>
+{% else %}
+<div class="table-responsive"><table class="table table-condensed vm-table">
+  <caption class="sr-only">{% trans "Volumes and snapshots needing attention, worst first" %}</caption>
+  <thead><tr><th scope="col">{% trans "Severity" %}</th><th scope="col">{% trans "Volume / snapshot" %}</th><th scope="col">{% trans "Project" %}</th><th scope="col">{% trans "Status" %}</th><th scope="col" class="text-right">{% trans "For" %}</th><th scope="col" class="text-right">{% trans "Size" %}</th><th scope="col">{% trans "Backend" %}</th><th scope="col">{% trans "What to do" %}</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr{% if row.level == "critical" %} class="danger"{% elif row.level == "warning" %} class="warning"{% endif %}>
+    <td>{% if row.level == "critical" %}<span class="label label-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {% trans "Critical" %}</span>{% elif row.level == "warning" %}<span class="label label-warning"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Warning" %}</span>{% else %}<span class="label label-info"><i class="fa fa-trash-o" aria-hidden="true"></i> {% trans "Clean-up" %}</span>{% endif %}</td>
+    <td>{% if row.url %}<a href="{{ row.url }}"><strong>{{ row.name }}</strong></a>{% else %}<strong>{{ row.name }}</strong>{% endif %}<br><small class="text-muted">{% if row.kind == "snapshot" %}{% trans "snapshot" %}{% else %}{% trans "volume" %}{% endif %}</small></td>
+    <td>{{ row.project_name }}</td>
+    <td><code>{{ row.status }}</code></td>
+    <td class="text-right">{{ row.for_text }}</td>
+    <td class="text-right">{% if row.size is not None %}{% blocktrans with size=row.size %}{{ size }} GiB{% endblocktrans %}{% endif %}</td>
+    <td>{{ row.backend|default:"–" }}</td>
+    <td class="vm-todo">{% if row.rule == "error" %}{% if row.status == "error_deleting" %}{% trans "Deletion failed: check the cinder-volume log, reset the state and delete it again." %}{% elif row.status == "error" %}{% trans "Creation or an operation failed: read the cinder-volume log, then delete it, or reset its state and retry." %}{% else %}{% trans "The operation failed: check the cinder-volume log, then reset the state and retry." %}{% endif %}{% elif row.rule == "stuck" %}{% blocktrans with minutes=thresholds.stuck_minutes %}Stuck for more than {{ minutes }} minutes: usually a backend or cinder-volume problem. Check the volume service of its backend.{% endblocktrans %}{% elif row.rule == "unattached" %}{% trans "Unattached and unchanged for a long time. Ask the project whether it is still needed." %}{% else %}{% trans "Old snapshot; newer snapshots of the same volume exist. Ask the project whether it is still needed." %}{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<div class="panel-footer vm-muted">
+  <i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with c=attention.counts.critical w=attention.counts.warning i=attention.counts.info %}{{ c }} critical, {{ w }} warning, {{ i }} clean-up.{% endblocktrans %}
+  {% if attention.total > limit %}{% blocktrans with n=limit total=attention.total %}{{ n }} of {{ total }} shown, worst first.{% endblocktrans %}{% endif %}
+  {% blocktrans with minutes=thresholds.stuck_minutes days=thresholds.unattached_days snap=thresholds.old_snapshot_days %}Errors first, then operations stuck for more than {{ minutes }} minutes, then clean-up candidates (volumes unattached for {{ days }} days or more, snapshots older than {{ snap }} days with a newer one of the same volume).{% endblocktrans %}
+  {% if attention.unattached_soon %}<br>{% trans "Not listed yet:" %} {% for v in attention.unattached_soon %}{% blocktrans with name=v.name days=v.days %}{{ name }} (unattached {{ days }} days){% endblocktrans %}{% if not forloop.last %}, {% endif %}{% endfor %}.{% endif %}
+  {% include "admin/volume_metrics/_notes.html" %}
+</div>
+{% endif %}

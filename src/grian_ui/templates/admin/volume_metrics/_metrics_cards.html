@@ -1,85 +1,89 @@
 {% load i18n %}
-<style>
-.metric-card {
-  min-height: 140px;
-  display: flex;
-  flex-direction: column;
-}
-.metric-card .panel-heading {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  padding: 20px 15px;
-}
-.metric-icon {
-  font-size: 3.5em;
-  opacity: 0.3;
-  margin-right: 15px;
-}
-.metric-value {
-  font-size: 2.5em;
-  font-weight: 300;
-  line-height: 1;
-  margin-bottom: 5px;
-}
-.metric-label {
-  font-size: 0.9em;
-  opacity: 0.9;
-  font-weight: 400;
-}
-.metric-sub {
-  font-size: 0.85em;
-  margin-top: 3px;
-}
-</style>
-
 {% if error_message %}
 <div class="col-sm-12">{% include "admin/volume_metrics/_error.html" with margin="0 0 15px" %}</div>
 {% else %}
+<div class="col-sm-12">
+{% with v=summary.verdict names=summary.verdict.names|join:", " %}
+<div class="vm-verdict vm-verdict-{{ v.level }}">
+  {% if v.key == "pools_full" %}
+  <h4><i class="fa fa-exclamation-circle text-danger" aria-hidden="true"></i>
+    {% blocktrans count n=v.count %}{{ n }} pool nearly full{% plural %}{{ n }} pools nearly full{% endblocktrans %}</h4>
+  <div>{{ names }}{% if v.count > v.names|length %} …{% endif %}.
+    <strong>{% trans "What to do:" %}</strong> {% trans "add capacity or move volumes away. When the virtual use is the limit (thin provisioning), raise max_over_subscription_ratio only if the physical space allows it." %}</div>
+  {% elif v.key == "pools_stale" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=v.count %}{{ n }} pool stopped reporting{% plural %}{{ n }} pools stopped reporting{% endblocktrans %}</h4>
+  <div>{{ names }}{% if v.count > v.names|length %} …{% endif %}.
+    {% trans "Their values are frozen at their last report. Usually their cinder-volume service is down, and volume operations on that backend fail: check the volume services." %}</div>
+  {% elif v.key == "volumes_error" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=summary.attention.counts.critical %}{{ n }} volume or snapshot in an error state{% plural %}{{ n }} volumes or snapshots in an error state{% endblocktrans %}</h4>
+  <div>{% trans "See \"Volumes and snapshots needing attention\" below." %}</div>
+  {% elif v.key == "pools_filling" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=v.count %}{{ n }} pool filling up{% plural %}{{ n }} pools filling up{% endblocktrans %}</h4>
+  <div>{{ names }}{% if v.count > v.names|length %} …{% endif %}.
+    {% trans "Plan capacity: see the forecasts below." %}</div>
+  {% elif v.key == "volumes_stuck" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=summary.attention.counts.warning %}{{ n }} volume operation stuck{% plural %}{{ n }} volume operations stuck{% endblocktrans %}</h4>
+  <div>{% blocktrans with minutes=thresholds.stuck_minutes %}In a transitional state for more than {{ minutes }} minutes: usually a backend or service problem. See "Volumes and snapshots needing attention" below.{% endblocktrans %}</div>
+  {% else %}
+  <h4><i class="fa fa-check-circle text-success" aria-hidden="true"></i> {% trans "Storage is healthy" %}</h4>
+  <div>{% blocktrans with physical=thresholds.physical_warning virtual=thresholds.virtual_warning count n=summary.pools_total %}{{ n }} pool below {{ physical }}% physical and {{ virtual }}% virtual use{% plural %}{{ n }} pools below {{ physical }}% physical and {{ virtual }}% virtual use{% endblocktrans %}{% if summary.attention %}, {% trans "no volume or snapshot in an error or stuck state." %}{% else %}. {% trans "Volumes and snapshots are not checked: the Block Storage API data is not available." %}{% endif %}
+    {% if summary.forecast_history_days is not None %}<br><i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with days=summary.forecast_history_days %}Forecasts need 7 days of history; the pools have {{ days }} days.{% endblocktrans %}{% endif %}</div>
+  {% endif %}
+</div>
+{% endwith %}
+</div>
+
 <div class="col-lg-3 col-md-6 col-sm-6">
-  <div class="panel panel-primary metric-card">
+  <div class="panel vm-card vm-info">
     <div class="panel-heading">
-      <i class="fa fa-hdd-o metric-icon"></i>
+      <i class="fa fa-database vm-icon" aria-hidden="true"></i>
       <div class="text-right" style="flex: 1;">
-        <div class="metric-value">{{ overview.total_storage }}</div>
-        <div class="metric-label">{% trans "Total Storage (GiB)" %}</div>
-        <div class="metric-sub">{% blocktrans count n=overview.pools_total %}{{ n }} pool{% plural %}{{ n }} pools{% endblocktrans %}{% if overview.pools_stale %} | {% blocktrans with n=overview.pools_stale %}{{ n }} stale{% endblocktrans %}{% endif %}</div>
+        <div class="vm-value">{{ summary.total|floatformat:"-1" }}</div>
+        <div class="vm-label">{% trans "Total Storage (GiB)" %}</div>
+        <div class="vm-sub">{% blocktrans count n=summary.pools_total %}{{ n }} pool{% plural %}{{ n }} pools{% endblocktrans %}{% if summary.pools_stale %} | {% blocktrans with n=summary.pools_stale %}{{ n }} stale{% endblocktrans %}{% endif %}</div>
       </div>
     </div>
   </div>
 </div>
 
 <div class="col-lg-3 col-md-6 col-sm-6">
-  <div class="panel panel-green metric-card">
+  <div class="panel vm-card vm-{{ summary.allocated_level }}">
     <div class="panel-heading">
-      <i class="fa fa-check-circle metric-icon"></i>
+      <i class="fa fa-pie-chart vm-icon" aria-hidden="true"></i>
       <div class="text-right" style="flex: 1;">
-        <div class="metric-value">{{ overview.allocated_storage }}</div>
-        <div class="metric-label">{% trans "Allocated Storage (GiB)" %}</div>
+        <div class="vm-value">{{ summary.allocated|floatformat:"-1" }}</div>
+        <div class="vm-label">{% trans "Allocated Storage (GiB)" %}</div>
+        <div class="vm-sub">{% if summary.physical_percent is not None %}{% blocktrans with p=summary.physical_percent|floatformat:0 %}{{ p }}% physical{% endblocktrans %}{% endif %}{% if summary.virtual_percent is not None %} | {% blocktrans with p=summary.virtual_percent|floatformat:0 %}{{ p }}% of the virtual limit{% endblocktrans %}{% endif %}</div>
       </div>
     </div>
   </div>
 </div>
 
 <div class="col-lg-3 col-md-6 col-sm-6">
-  <div class="panel panel-yellow metric-card">
+  <div class="panel vm-card {% if not summary.attention %}vm-info{% elif summary.attention.counts.critical %}vm-critical{% elif summary.attention.counts.warning %}vm-warning{% else %}vm-info{% endif %}">
     <div class="panel-heading">
-      <i class="fa fa-database metric-icon"></i>
+      <i class="fa fa-hdd-o vm-icon" aria-hidden="true"></i>
       <div class="text-right" style="flex: 1;">
-        <div class="metric-value">{{ volumes }}</div>
-        <div class="metric-label">{% trans "Total Volumes" %}</div>
+        <div class="vm-value">{{ volumes }}</div>
+        <div class="vm-label">{% trans "Volumes" %}</div>
+        <div class="vm-sub">{% if not summary.attention %}{% trans "attention not checked" %}{% elif summary.attention.volumes_attention %}{% blocktrans count n=summary.attention.volumes_attention %}{{ n }} needs attention{% plural %}{{ n }} need attention{% endblocktrans %}{% else %}{% trans "none needs attention" %}{% endif %}</div>
       </div>
     </div>
   </div>
 </div>
 
 <div class="col-lg-3 col-md-6 col-sm-6">
-  <div class="panel panel-red metric-card">
+  <div class="panel vm-card vm-info">
     <div class="panel-heading">
-      <i class="fa fa-camera metric-icon"></i>
+      <i class="fa fa-camera vm-icon" aria-hidden="true"></i>
       <div class="text-right" style="flex: 1;">
-        <div class="metric-value">{{ snapshots }}</div>
-        <div class="metric-label">{% trans "Total Snapshots" %}</div>
+        <div class="vm-value">{{ snapshots }}</div>
+        <div class="vm-label">{% trans "Snapshots" %}</div>
+        <div class="vm-sub">{% if summary.attention %}{% blocktrans count n=summary.attention.counts.info %}{{ n }} clean-up candidate{% plural %}{{ n }} clean-up candidates{% endblocktrans %}{% endif %}</div>
       </div>
     </div>
   </div>

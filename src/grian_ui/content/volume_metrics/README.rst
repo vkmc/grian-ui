@@ -1,12 +1,14 @@
 ================================
-Testing the Volume Metrics panel
+Testing the Storage Health panel
 ================================
 
 .. note::
     These are development instructions. This content will be moved to the
     official documentation.
 
-This document provides instructions on how to test the Volume Metrics panel.
+This document provides instructions on how to test the Storage Health panel
+(formerly Volume Metrics; its URL slug and enabled file still use
+``volume_metrics``).
 
 Prerequisites
 =============
