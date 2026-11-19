@@ -1,10 +1,10 @@
 {% extends 'base.html' %}
 {% load i18n %}
 {% load static %}
-{% block title %}{% trans "Volume Metrics" %}{% endblock %}
+{% block title %}{% trans "Storage Health" %}{% endblock %}
 
 {% block page_header %}
-  {% include "horizon/common/_page_header.html" with title=_("Volume Metrics") %}
+  {% include "horizon/common/_page_header.html" with title=_("Storage Health") %}
 {% endblock page_header %}
 
 {% block main %}
@@ -41,7 +41,47 @@
 .vm-muted { color: #595959; font-size: 12px; }
 .vm-note { margin: 6px 0 0; }
 .vm-loading { padding: 25px; text-align: center; color: #666; }
-.pool-stale { color: #8a6d3b; }
+.pool-stale { color: #6b4f1d; }
+.vm-toolbar { margin-bottom: 15px; }
+.vm-card { border: 0; color: #fff; }
+.vm-card .panel-heading { display: flex; align-items: center; min-height: 110px; padding: 18px 15px; color: #fff; border: 0; border-radius: 3px; }
+/* darker than the chart colours so white text meets WCAG AA (>= 4.5:1) */
+.vm-card.vm-info .panel-heading { background: #337ab7; }
+.vm-card.vm-ok .panel-heading { background: #2b7a2b; }
+.vm-card.vm-warning .panel-heading { background: #a35c00; }
+.vm-card.vm-critical .panel-heading { background: #b52b27; }
+.vm-card .vm-icon { font-size: 3em; opacity: .3; margin-right: 15px; }
+.vm-card .vm-value { font-size: 2.3em; font-weight: 300; line-height: 1; margin-bottom: 4px; }
+.vm-card .vm-label { font-size: .95em; }
+.vm-card .vm-sub { font-size: .85em; margin-top: 3px; }
+#vm-root .vm-cards { display: flex; flex-wrap: wrap; }
+#vm-root .vm-cards::before, #vm-root .vm-cards::after { display: none; }
+#vm-root .vm-cards > [class*="col-"] { display: flex; flex-direction: column; }
+#vm-root .vm-cards .vm-card { flex: 1; display: flex; flex-direction: column; }
+#vm-root .vm-cards .vm-card .panel-heading { flex: 1; }
+#vm-root .label-success { background-color: #2b7a2b; }
+#vm-root .label-warning { background-color: #a35c00; }
+#vm-root .label-danger { background-color: #b52b27; }
+#vm-root .label-info { background-color: #1f6f8b; }
+#vm-root .label-default { background-color: #666; }
+#vm-root .text-warning { color: #6b4f1d; }
+#vm-root .text-muted { color: #595959; }
+.vm-verdict { border-left: 5px solid; padding: 12px 15px; margin-bottom: 15px; background: #f7f7f7; }
+.vm-verdict h4 { margin: 0 0 6px; font-weight: 600; }
+.vm-verdict-ok { border-color: #2b7a2b; }
+.vm-verdict-warning { border-color: #a35c00; background: #fcf8f2; }
+.vm-verdict-critical { border-color: #b52b27; background: #fbf1f1; }
+.vm-src { font-size: 11px; font-weight: normal; color: #595959; border: 1px solid #ccc; border-radius: 3px; padding: 1px 5px; margin-left: 6px; }
+.vm-bounded { font-size: 11px; font-weight: normal; color: #fff; background: #2b7a2b; border-radius: 3px; padding: 1px 6px; margin-left: 6px; }
+.vm-table { margin-bottom: 0; }
+.vm-table td, .vm-table th { vertical-align: middle !important; }
+.vm-todo { max-width: 380px; font-size: 12px; }
+.vm-empty { padding: 25px 20px; text-align: center; color: #595959; }
+.vm-empty .fa { font-size: 2.5em; opacity: .6; display: block; margin-bottom: 8px; }
+.vm-how > summary { cursor: pointer; }
+.vm-how > summary .panel-title { display: inline; }
+.vm-how-table th, .vm-how-table td { padding: 3px 12px 3px 0; vertical-align: top; }
+.vm-how-table th[scope="row"] { white-space: nowrap; }
 </style>
 
 <script>
@@ -88,10 +128,20 @@ document.addEventListener('visibilitychange', function () {
 });
 </script>
 
+{% if config_error %}
+<div class="alert alert-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ config_error }}</div>
+{% endif %}
 <div id="vm-root" hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
 
-<!-- Auto-refreshing metrics cards -->
-<div class="row metrics-section"
+<div class="row vm-toolbar">
+  <div class="col-sm-12 text-right vm-muted">
+    <i class="fa fa-refresh" aria-hidden="true"></i>
+    {% blocktrans with seconds=refresh_seconds %}Refreshes every {{ seconds }}s{% endblocktrans %}
+  </div>
+</div>
+
+<!-- Verdict and summary cards -->
+<div class="row metrics-section vm-cards"
      id="metrics-cards"
      hx-get="{% url 'horizon:admin:volume_metrics:metrics_update' %}"
      hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], vm-refresh from:body, vm-retry"
@@ -99,18 +149,24 @@ document.addEventListener('visibilitychange', function () {
   <div class="col-sm-12 vm-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
 </div>
 
-<!-- Two column layout for chart and pools -->
-<div class="row metrics-section">
-  <!-- Storage Chart Column -->
-  <div class="col-md-6" id="storage-chart"
-       hx-get="{% url 'horizon:admin:volume_metrics:chart_update' %}"
+<!-- Volumes and snapshots needing attention -->
+<div class="panel panel-default metrics-section">
+  <div class="panel-heading">
+    <h3 class="panel-title"><i class="fa fa-bell" aria-hidden="true"></i> {% trans "Volumes and snapshots needing attention" %}
+      <span class="vm-src">{% trans "Block Storage API" %}</span>
+      <span class="vm-bounded">{% blocktrans with n=attention_limit %}max {{ n }} rows{% endblocktrans %}</span></h3>
+  </div>
+  <div id="attention"
+       hx-get="{% url 'horizon:admin:volume_metrics:attention' %}"
        hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], vm-refresh from:body, vm-retry"
        hx-swap="innerHTML">
     <div class="vm-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
   </div>
+</div>
 
-  <!-- Storage Pools Column -->
-  <div class="col-md-6">
+<div class="row metrics-section">
+  <!-- Storage Pools -->
+  <div class="col-md-12">
     <div class="panel panel-default">
       <div class="panel-heading">
         <h3 class="panel-title">
@@ -201,7 +257,7 @@ document.addEventListener('visibilitychange', function () {
                 <td class="text-right">{{ pool.provisioned|floatformat:2 }}</td>
                 <td class="text-right">{% if pool.virtual_free is not None %}{{ pool.virtual_free|floatformat:2 }}{% else %}<span class="text-muted">{% trans "N/A" %}</span>{% endif %}</td>
                 <td class="text-right">
-                  <span class="label {% if pool.usage_percent >= 90 %}label-danger{% elif pool.usage_percent >= 75 %}label-warning{% else %}label-success{% endif %}">
+                  <span class="label {% if pool.physical_level == "critical" %}label-danger{% elif pool.physical_level == "warning" %}label-warning{% else %}label-success{% endif %}">
                     {{ pool.usage_percent }}%
                   </span>
                 </td>
@@ -218,6 +274,27 @@ document.addEventListener('visibilitychange', function () {
     </div>
   </div>
 </div>
+
+{% if thresholds %}
+{# A native disclosure: keyboard and screen reader support without script. #}
+<details class="panel panel-default vm-how" id="vm-how">
+  <summary class="panel-heading"><h3 class="panel-title"><i class="fa fa-sliders" aria-hidden="true"></i> {% trans "How this page is calculated" %} <small class="text-muted">{% trans "(click to expand)" %}</small></h3></summary>
+  <div class="panel-body">
+    <table class="vm-how-table vm-muted">
+      <tr><th scope="col">{% trans "Item" %}</th><th scope="col">{% trans "Source, query or rule" %}</th></tr>
+      <tr><th scope="row">{% trans "Pool metrics" %}</th><td>{% blocktrans with seconds=refresh_seconds %}One query per metric for all pools: <code>max by (resource) (last_over_time(ceilometer_volume_provider_pool_capacity_{total,allocated,free,provisioned,virtual_free}[24h]))</code>, plus the time of each pool's last report. Read at most once every {{ seconds }} s and shared by every section and administrator.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Physical use" %}</th><td>{% blocktrans with w=thresholds.physical_warning c=thresholds.physical_critical %}Allocated ÷ total. Warning at {{ w }}%, critical at {{ c }}%.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Virtual use" %}</th><td>{% blocktrans with w=thresholds.virtual_warning c=thresholds.virtual_critical %}Provisioned ÷ limit, where limit = provisioned + virtual free (total × <code>max_over_subscription_ratio</code>). Warning at {{ w }}%, critical at {{ c }}%. On thin pools this is usually what runs out first.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Forecast" %}</th><td>{% blocktrans with c=thresholds.forecast_critical_days w=thresholds.forecast_warning_days %}<code>predict_linear(…[7d], 30 * 86400)</code> on both free and virtual free capacity; the page shows whichever reaches zero first. Critical within {{ c }} days, warning within {{ w }} days. Needs 7 days of history; recomputed every 5 minutes.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Stale pool" %}</th><td>{% blocktrans with minutes=stale_minutes %}No report in the last {{ minutes }} minutes (<code>GRIAN_PLUGIN['storage_stale_minutes']</code>) but one in the last 24 hours: its values are frozen at its last report, it is not forecast, and it is at least a warning.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Needing attention" %}</th><td>{% blocktrans with minutes=thresholds.stuck_minutes days=thresholds.unattached_days snap=thresholds.old_snapshot_days limit=attention_limit stored=attention_store_limit %}Block Storage API, all projects, the worst {{ limit }} rows shown (up to {{ stored }} kept in the shared summary, counts exact). Critical: <code>error</code>, <code>error_deleting</code>, <code>error_restoring</code>, <code>error_extending</code>. Warning: <code>creating</code>, <code>attaching</code>, <code>detaching</code>, <code>deleting</code> for more than {{ minutes }} minutes (since the last update). Clean-up: volumes available and unattached, unchanged for {{ days }} days or more; snapshots older than {{ snap }} days with a newer one of the same volume.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Block Storage API data" %}</th><td>{% blocktrans with minutes=inventory_minutes seconds=refresh_seconds %}Every volume and snapshot of every project is listed once per region every {{ minutes }} minutes (two listings following every page, like Instance Health reads the Compute API) and summarized; every section and administrator shares that summary, so page refreshes (every {{ seconds }} s) never call the Block Storage API, and state changes can show up that late. Project names come from the Identity API.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Refresh and errors" %}</th><td>{% trans "If a source fails, the last good data is shown with the time it was fetched, and the page retries at the next refresh. Data older than its refresh interval plus 30 seconds is flagged as possibly out of date." %}</td></tr>
+    </table>
+    <p class="vm-muted" style="margin: 8px 0 0;">{% trans "Thresholds can be overridden in <code>local_settings</code> with <code>GRIAN_PLUGIN['storage_thresholds']</code>. The panel keeps its URL (<code>/admin/volume_metrics/</code>) so existing links and bookmarks still work." %}</p>
+  </div>
+</details>
+{% endif %}
 
 <script>
 function togglePoolDetails() {

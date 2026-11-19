@@ -1,11 +1,16 @@
 ========================
-Volume Metrics Dashboard
+Storage Health Dashboard
 ========================
 
-The Volume Metrics dashboard provides cloud administrators with a real-time
-overview of Cinder block storage resources across the deployment. It is
-accessible under **Admin > Telemetry > Volume Metrics** and requires the
-``openstack.roles.admin`` permission.
+The Storage Health dashboard (formerly Volume Metrics) tells cloud
+administrators whether Cinder block storage is healthy and when it runs
+out, across the deployment. It is accessible under
+**Admin > Telemetry > Storage Health** and requires the
+``openstack.roles.admin`` permission. Its URL is still
+``/admin/volume_metrics/`` and its enabled file
+``_1001_admin_volume_metrics_panel.py``, so existing links, bookmarks and
+deployer configuration keep working. For a guide to reading the page, see
+:doc:`user-storage-health`.
 
 All metrics originate from `Ceilometer <https://docs.openstack.org/ceilometer/latest/>`_
 volume pollster data, stored in Prometheus via the
@@ -17,15 +22,62 @@ Ceilometer meters follow a naming convention when exposed as Prometheus
 metrics: dots are replaced with underscores and a ``ceilometer_`` prefix is
 added (e.g. ``volume.size`` becomes ``ceilometer_volume_size``).
 
+The state of volumes and snapshots (errors, stuck operations, clean-up
+candidates) is not in Ceilometer: it is read from the Block Storage API
+(Cinder) with the administrator's token, see
+`Volumes and snapshots needing attention`_.
+
 
 Panels
 ======
 
+Verdict
+-------
+
+One sentence at the top sums the page up, the first that applies:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 15 50
+
+   * - Verdict
+     - Level
+     - Rule
+   * - *N* pools nearly full
+     - critical
+     - A pool reporting now is critical: physical or virtual use at the
+       critical threshold, or forecast full within the critical number of
+       days.
+   * - *N* pools stopped reporting
+     - warning
+     - A pool is stale (no report within the staleness window, 10
+       minutes by default): usually its
+       ``cinder-volume`` service is down.
+   * - *N* volumes or snapshots in an error state
+     - warning
+     - See `Volumes and snapshots needing attention`_.
+   * - *N* pools filling up
+     - warning
+     - A pool reporting now is at the warning level.
+   * - *N* volume operations stuck
+     - warning
+     - A volume or snapshot has been in a transitional state for longer
+       than ``stuck_minutes``.
+   * - Storage is healthy
+     - ok
+     - None of the above. Adds how many days of history the forecasts
+       have while it is less than 7.
+
 Summary Cards
 -------------
 
-Four metric cards displayed at the top of the dashboard, auto-refreshing
-every **60 seconds** (while the browser tab is visible).
+Four metric cards displayed under the verdict, auto-refreshing every
+**60 seconds** (while the browser tab is visible). The allocated storage
+card is coloured by the worse of the cloud's physical use (allocated ÷
+total) and virtual use (provisioned ÷ over-subscription limit), the volumes
+card by the volumes and snapshots needing attention (red: errors, orange:
+stuck operations); it says how many need attention, and the snapshots card
+how many clean-up candidates there are.
 
 .. list-table::
    :header-rows: 1
@@ -56,29 +108,67 @@ Ceilometer samples, which corresponds to the number of active volumes and
 snapshots in the deployment.
 
 
-Volume and Snapshot Distribution (Doughnut Chart)
--------------------------------------------------
+Volumes and snapshots needing attention
+---------------------------------------
 
-A Chart.js doughnut chart showing the proportion of volumes to snapshots.
-Refreshed with the summary cards, from the same ``count()`` queries.
+Replaces the former "Volume and Snapshot Distribution" chart, which
+repeated the card counts. At most **25 rows**, worst first, from the Block
+Storage API, all projects:
 
 .. list-table::
    :header-rows: 1
-   :widths: 25 30 45
+   :widths: 15 55 30
 
-   * - Segment
-     - Ceilometer Meter
-     - PromQL
-   * - Volumes
-     - ``volume.size``
-     - ``count(ceilometer_volume_size)``
-   * - Snapshots
-     - ``volume.snapshot.size``
-     - ``count(ceilometer_volume_snapshot_size)``
+   * - Severity
+     - Rule
+     - Typical action
+   * - Critical
+     - Volumes in ``error``, ``error_deleting``, ``error_restoring`` or
+       ``error_extending``; snapshots in ``error`` or ``error_deleting``.
+     - Read the ``cinder-volume`` log; reset the state and retry, or
+       delete.
+   * - Warning
+     - Volumes in ``creating``, ``attaching``, ``detaching`` or
+       ``deleting``, snapshots in ``creating`` or ``deleting``, for more
+       than ``stuck_minutes`` (30) since their last update.
+     - Usually a backend or service problem.
+   * - Clean-up
+     - Volumes ``available``, unattached and unchanged (last update) for
+       ``unattached_days`` (30) or more; snapshots older than
+       ``old_snapshot_days`` (90) with a newer snapshot of the same volume.
+     - Ask the owning project.
 
-This chart gives a quick visual ratio of how storage objects are distributed
-between volumes and snapshots.
+Within a severity, the oldest come first. The backend is the volume's
+``host@backend`` (a snapshot's comes from its volume). The footer counts
+each severity and names up to three unattached volumes that are not old
+enough for the clean-up rule yet.
 
+**Block Storage API calls.** The same limits as the other Telemetry
+dashboards (Instance Health reads the Compute API the same way):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 45
+
+   * - Call
+     - How often
+     - Kept
+   * - ``GET /v3/{project}/volumes/detail?all_tenants=1`` and
+       ``.../snapshots/detail?all_tenants=1``, following every page (one
+       request per ``osapi_max_limit`` items, 1000 by default)
+     - once per region every **2 minutes**
+     - a bounded summary: up to 500 attention rows, worst first, with
+       exact counts (25 rows shown), three names
+   * - ``GET /v3/projects`` (Identity API, project names)
+     - every **5 minutes**
+     - project ID to name
+
+Every section and administrator shares these values through the Horizon
+cache; page refreshes never call the Block Storage API themselves, so
+state changes can show up to 2 minutes late. A copy older than its
+lifetime plus 30 seconds is flagged as possibly out of date. When the
+Block Storage API fails, the verdict and cards
+are built from the metrics alone and say that volumes were not checked.
 
 Storage Pools
 -------------
@@ -124,7 +214,8 @@ Each pool is displayed with:
 - A **detail row** with free and provisioned values.
 - A **collapsible table** with all numeric values, the virtual free
   capacity, the time of the last report and a color-coded usage percentage
-  label (green < 75%, yellow 75-89%, red >= 90%).
+  label (by default green below 75%, orange from 75%, red from 90%; see
+  `Configuration`_).
 
 **Stale pools.** A pool that has not reported for 10 minutes (the
 staleness window, see `Configuration`_), usually because its
@@ -187,11 +278,12 @@ reaches zero using linear interpolation::
     decline_per_day = (current - predicted_value) / 30
     days_until_full = current / decline_per_day
 
-Status labels:
+Status labels (with the default thresholds):
 
-- **Full in N days** (red): a capacity reaches zero within 30 days.
-- **Declining: full in N days** (yellow): a capacity is decreasing but
-  will not reach zero within 30 days.
+- **Full in N days** (red within 14 days, orange within 30 days): a
+  capacity reaches zero.
+- **Declining: full in N days** (grey): a capacity is decreasing but will
+  not reach zero within 30 days.
 - **Healthy** (green): both capacities are stable or increasing.
 - **Insufficient data (N of 7 days)** (grey): the pool has less than 7
   days of history.
@@ -226,20 +318,55 @@ yet shows a plain error message.
 Configuration
 =============
 
-``[10m]`` in the queries above is the **staleness window**: only reports
-within it count as current, and a pool without a report for longer is
-stale. Override it in ``local_settings``:
+Override these settings in ``local_settings``, for example:
 
 .. code-block:: python
 
    GRIAN_PLUGIN = {
        "datasource": "prometheus",
        "storage_stale_minutes": 20,
+       "storage_thresholds": {"physical_warning": 80},
    }
 
-It must be a whole number of minutes from 1 to 360 (default 10), at least
-twice the Ceilometer polling interval. An invalid value is logged and the
-page sections say that the configuration is invalid.
+``storage_stale_minutes`` is the **staleness window** (``[10m]`` in the
+queries above): only reports within it count as current, and a pool
+without a report for longer is stale. It must be a whole number of minutes
+from 1 to 360 (default 10), at least twice the Ceilometer polling
+interval.
+
+``storage_thresholds`` overrides the status thresholds per key:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 15 55
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``physical_warning``, ``physical_critical``
+     - 75, 90
+     - Physical use of a pool (allocated ÷ total), percent
+   * - ``virtual_warning``, ``virtual_critical``
+     - 75, 90
+     - Virtual use of a pool (provisioned ÷ over-subscription limit),
+       percent
+   * - ``forecast_warning_days``, ``forecast_critical_days``
+     - 30, 14
+     - A pool forecast to be full within this many days
+   * - ``stuck_minutes``
+     - 30
+     - A volume or snapshot in a transitional state for longer is stuck
+   * - ``unattached_days``
+     - 30
+     - Clean-up: volumes unattached and unchanged for this many days
+   * - ``old_snapshot_days``
+     - 90
+     - Clean-up: snapshots this old with a newer one of the same volume
+
+Percentages go up to 100, each warning must not be greater than its
+critical value, and ``forecast_critical_days`` must not be greater than
+``forecast_warning_days``. An invalid value is shown at the top of the
+page and logged.
 
 
 Data Pipeline

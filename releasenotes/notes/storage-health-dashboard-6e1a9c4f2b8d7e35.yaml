@@ -1,0 +1,18 @@
+---
+features:
+  - |
+    The Volume Metrics panel is renamed **Storage Health** and now says
+    whether block storage is healthy. Its URL (``/admin/volume_metrics/``),
+    panel class and enabled file (``_1001_admin_volume_metrics_panel.py``)
+    are unchanged, so links, bookmarks and deployer configuration keep
+    working. It adds a verdict, summary cards coloured by thresholds (the
+    volumes card says how many need attention), and a list of at most 25
+    volumes and snapshots needing attention, from the Block Storage API:
+    error states, operations stuck in a transitional state for more than
+    30 minutes, and clean-up candidates (volumes unattached for 30 days,
+    old snapshots with a newer one of the same volume). It replaces the
+    volume and snapshot distribution chart. Every volume and snapshot is
+    listed once per region every two minutes and summarized (up to 500
+    rows kept with exact counts, the same limits as Instance Health); page
+    refreshes never call the Block Storage API. Thresholds can be
+    configured with ``GRIAN_PLUGIN['storage_thresholds']``.
