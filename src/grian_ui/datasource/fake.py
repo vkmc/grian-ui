@@ -6,36 +6,13 @@ Fake datasource implementation for development and testing.
 Provides realistic sample telemetry data.
 """
 
-import random  # nosec
-
-from datetime import datetime
+import time
 
 from grian_ui.datasource.api import DatasourceClient
 
 
 class FakeTelemetryClient(DatasourceClient):
     """Fake telemetry client that generates sample data."""
-
-    def get_telemetry_overview(self) -> dict:
-        """
-        Get telemetry overview data.
-
-        Returns sample data for development/testing purposes.
-        In a real implementation, this would aggregate multiple queries.
-        """
-        return {
-            "total_metrics": 1247,
-            "active_instances": 18,
-            "alerts_count": 3,
-            "cpu_usage_avg": round(random.uniform(15.0, 85.0), 1),  # nosec
-            "memory_usage_avg": round(random.uniform(25.0, 75.0), 1),  # nosec
-            "network_throughput": round(random.uniform(50.0, 200.0), 1),  # nosec
-            "disk_io_rate": round(random.uniform(10.0, 100.0), 1),  # nosec
-            "uptime_percentage": round(random.uniform(98.5, 99.9), 2),  # nosec
-            "total_storage": 10240,  # GB
-            "allocated_storage": round(random.uniform(6000, 9000)),  # nosec GB
-            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
 
     def get_volumes_count(self) -> int:
         """
@@ -57,8 +34,10 @@ class FakeTelemetryClient(DatasourceClient):
         """
         Get storage pools information.
 
-        Returns sample pool data for development/testing.
+        Returns sample pool data for development/testing: a thick pool, a
+        thin pool close to its over-subscription limit, and a stale pool.
         """
+        now = time.time()
         return [
             {
                 "name": "storage-pool-01",
@@ -66,13 +45,29 @@ class FakeTelemetryClient(DatasourceClient):
                 "allocated": 4096.0,
                 "free": 1024.0,
                 "provisioned": 5120.0,
+                "virtual_free": None,
+                "last_seen": now - 40,
+                "stale": False,
             },
             {
                 "name": "storage-pool-02",
                 "total": 5120.0,
-                "allocated": 4096.0,
-                "free": 1024.0,
+                "allocated": 2048.0,
+                "free": 3072.0,
                 "provisioned": 8192.0,
+                "virtual_free": 2048.0,
+                "last_seen": now - 25,
+                "stale": False,
+            },
+            {
+                "name": "storage-pool-03",
+                "total": 2048.0,
+                "allocated": 512.0,
+                "free": 1536.0,
+                "provisioned": 600.0,
+                "virtual_free": 3496.0,
+                "last_seen": now - 3 * 3600,
+                "stale": True,
             },
         ]
 
@@ -80,22 +75,33 @@ class FakeTelemetryClient(DatasourceClient):
         """
         Get capacity predictions for storage pools.
 
-        Returns sample prediction data for development/testing.
+        Returns sample prediction data for development/testing (pools
+        reporting now only).
         """
         return [
             {
                 "name": "storage-pool-01",
                 "current_free": 1024.0,
-                "predicted_value": 512.0,
-                "days_until_full": None,
-                "will_run_out": False,
+                "current_virtual_free": None,
+                "days_physical": 51.2,
+                "days_virtual": None,
+                "days_until_full": 51.2,
+                "limiting": "physical",
+                "will_run_out": True,
+                "history_days": 7.0,
+                "enough_history": True,
             },
             {
                 "name": "storage-pool-02",
-                "current_free": 1024.0,
-                "predicted_value": -200.0,
+                "current_free": 3072.0,
+                "current_virtual_free": 2048.0,
+                "days_physical": None,
+                "days_virtual": 24.5,
                 "days_until_full": 24.5,
+                "limiting": "virtual",
                 "will_run_out": True,
+                "history_days": 7.0,
+                "enough_history": True,
             },
         ]
 

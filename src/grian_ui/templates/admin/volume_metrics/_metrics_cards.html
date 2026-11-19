@@ -27,15 +27,23 @@
   opacity: 0.9;
   font-weight: 400;
 }
+.metric-sub {
+  font-size: 0.85em;
+  margin-top: 3px;
+}
 </style>
 
+{% if error_message %}
+<div class="col-sm-12">{% include "admin/volume_metrics/_error.html" with margin="0 0 15px" %}</div>
+{% else %}
 <div class="col-lg-3 col-md-6 col-sm-6">
   <div class="panel panel-primary metric-card">
     <div class="panel-heading">
       <i class="fa fa-hdd-o metric-icon"></i>
       <div class="text-right" style="flex: 1;">
-        <div class="metric-value">{{ overview.total_storage|default:"N/A" }}</div>
+        <div class="metric-value">{{ overview.total_storage }}</div>
         <div class="metric-label">{% trans "Total Storage (GiB)" %}</div>
+        <div class="metric-sub">{% blocktrans count n=overview.pools_total %}{{ n }} pool{% plural %}{{ n }} pools{% endblocktrans %}{% if overview.pools_stale %} | {% blocktrans with n=overview.pools_stale %}{{ n }} stale{% endblocktrans %}{% endif %}</div>
       </div>
     </div>
   </div>
@@ -46,7 +54,7 @@
     <div class="panel-heading">
       <i class="fa fa-check-circle metric-icon"></i>
       <div class="text-right" style="flex: 1;">
-        <div class="metric-value">{{ overview.allocated_storage|default:"N/A" }}</div>
+        <div class="metric-value">{{ overview.allocated_storage }}</div>
         <div class="metric-label">{% trans "Allocated Storage (GiB)" %}</div>
       </div>
     </div>
@@ -76,3 +84,5 @@
     </div>
   </div>
 </div>
+<div class="col-sm-12">{% include "admin/volume_metrics/_notes.html" %}</div>
+{% endif %}

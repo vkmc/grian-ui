@@ -1,0 +1,3 @@
+{# The section's data is not available: a plain message, details in the Horizon log. #}
+<div data-vm-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: {{ margin|default:'0' }};"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "admin/volume_metrics/_retry.html" %}

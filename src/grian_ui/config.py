@@ -186,3 +186,37 @@ def get_openstack_keystone_url():
 def get_openstack_endpoint_type():
     """Get OpenStack endpoint type (interface) from settings."""
     return getattr(settings, "OPENSTACK_ENDPOINT_TYPE", "publicURL")
+
+
+#: Default storage staleness window (Storage Health, the Volume Metrics
+#: panel), minutes, and its largest accepted value.
+DEFAULT_STORAGE_STALE_MINUTES = 10
+MAX_STORAGE_STALE_MINUTES = 360
+
+
+def get_storage_stale_minutes():
+    """
+    Get the storage staleness window, in minutes.
+
+    A storage pool (or Cinder service) without a report for longer is
+    stale, and only reports within this window count as current. Override
+    with ``GRIAN_PLUGIN['storage_stale_minutes']``: a whole number from 1
+    to MAX_STORAGE_STALE_MINUTES, at least twice the Ceilometer polling
+    interval.
+
+    Raises:
+        ConfigurationError: If the value is not a valid number of minutes
+    """
+    value = _get_grian_plugin_config().get(
+        "storage_stale_minutes", DEFAULT_STORAGE_STALE_MINUTES
+    )
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= MAX_STORAGE_STALE_MINUTES
+    ):
+        raise ConfigurationError(
+            "GRIAN_PLUGIN['storage_stale_minutes'] must be a whole number "
+            f"of minutes from 1 to {MAX_STORAGE_STALE_MINUTES}, got {value!r}"
+        )
+    return value

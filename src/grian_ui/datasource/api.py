@@ -38,11 +38,6 @@ class DatasourceClient(ABC):
     """Abstract base class for datasource clients."""
 
     @abstractmethod
-    def get_telemetry_overview(self) -> dict:
-        """Get overview telemetry data."""
-        pass
-
-    @abstractmethod
     def get_volumes_count(self) -> int:
         """Get volumes count telemetry data."""
         pass

@@ -3,6 +3,8 @@
 
 from unittest import mock
 
+from django.test import override_settings
+
 from grian_ui.datasource import api
 from grian_ui_tests.unit import base
 
@@ -82,48 +84,6 @@ class PrometheusTelemetryClientInitTests(base.TestCase):
         self.assertIsInstance(client, api.DatasourceClient)
 
 
-class GetTelemetryOverviewTests(base.TestCase):
-    def test_returns_metrics(self):
-        query_map = {
-            "sum(ceilometer_vcpus)": [_make_metric(64)],
-            "sum(ceilometer_memory_usage)": [_make_metric(32768)],
-            "sum(ceilometer_volume_provider_pool_capacity_total)": [
-                _make_metric(10240)
-            ],
-            "sum(ceilometer_volume_provider_pool_capacity_allocated)": [
-                _make_metric(7000)
-            ],
-        }
-        client, _ = _make_client(query_map)
-
-        result = client.get_telemetry_overview()
-
-        self.assertEqual(result["cpu_usage_avg"], 64.0)
-        self.assertEqual(result["memory_usage_avg"], 32.0)
-        self.assertEqual(result["total_storage"], 10240)
-        self.assertEqual(result["allocated_storage"], 7000)
-
-    def test_empty_results_return_zeros(self):
-        client, prom = _make_client()
-        prom.query.return_value = []
-
-        result = client.get_telemetry_overview()
-
-        self.assertEqual(result["cpu_usage_avg"], 0.0)
-        self.assertEqual(result["memory_usage_avg"], 0.0)
-        self.assertEqual(result["total_storage"], 0)
-        self.assertEqual(result["allocated_storage"], 0)
-
-    def test_exception_returns_partial_data_with_error(self):
-        client, prom = _make_client()
-        prom.query.side_effect = Exception("connection refused")
-
-        result = client.get_telemetry_overview()
-
-        self.assertIn("error", result)
-        self.assertIn("connection refused", result["error"])
-
-
 class GetVolumesCountTests(base.TestCase):
     def test_returns_count(self):
         client, prom = _make_client()
@@ -168,31 +128,92 @@ class GetSnapshotsCountTests(base.TestCase):
         self.assertEqual(client.get_snapshots_count(), 0)
 
 
+def _pool_query(field, window="24h"):
+    return (
+        "max by (resource) (last_over_time("
+        f"ceilometer_volume_provider_pool_capacity_{field}[{window}]))"
+    )
+
+
+def _predict_query(field):
+    return (
+        "max by (resource) (predict_linear("
+        f"ceilometer_volume_provider_pool_capacity_{field}[7d], 30 * 86400))"
+    )
+
+
 class GetStoragePoolsTests(base.TestCase):
-    def test_returns_pools(self):
-        pool_metric = _make_metric(5120.0, {"resource": "pool-01"})
-        query_map = {
-            "ceilometer_volume_provider_pool_capacity_total": [pool_metric],
-            'ceilometer_volume_provider_pool_capacity_allocated{resource="pool-01"}': [
-                _make_metric(4096.0)
-            ],
-            'ceilometer_volume_provider_pool_capacity_free{resource="pool-01"}': [
-                _make_metric(1024.0)
-            ],
-            'ceilometer_volume_provider_pool_capacity_provisioned{resource="pool-01"}': [
-                _make_metric(6000.0)
-            ],
+    def _query_map(self, last_seen):
+        from grian_ui.datasource import prometheus
+
+        def pool(value):
+            return [_make_metric(value, {"resource": "pool-01"})]
+
+        return {
+            _pool_query("total"): pool(5120.0),
+            _pool_query("allocated"): pool(4096.0),
+            _pool_query("free"): pool(1024.0),
+            _pool_query("provisioned"): pool(6000.0),
+            _pool_query("virtual_free"): pool(9000.0),
+            prometheus.pool_last_seen_query(): pool(last_seen),
         }
-        client, _ = _make_client(query_map)
+
+    @mock.patch("grian_ui.datasource.prometheus.time.time", return_value=1e6)
+    def test_returns_pools(self, _time):
+        client, prom = _make_client(self._query_map(1e6 - 60))
 
         result = client.get_storage_pools()
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["name"], "pool-01")
-        self.assertEqual(result[0]["total"], 5120.0)
-        self.assertEqual(result[0]["allocated"], 4096.0)
-        self.assertEqual(result[0]["free"], 1024.0)
-        self.assertEqual(result[0]["provisioned"], 6000.0)
+        self.assertEqual(
+            result,
+            [
+                {
+                    "name": "pool-01",
+                    "total": 5120.0,
+                    "allocated": 4096.0,
+                    "free": 1024.0,
+                    "provisioned": 6000.0,
+                    "virtual_free": 9000.0,
+                    "last_seen": 1e6 - 60,
+                    "stale": False,
+                }
+            ],
+        )
+
+    def test_one_query_per_metric(self):
+        client, prom = _make_client(self._query_map(0))
+        client.get_storage_pools()
+        # five metrics and the last report, whatever the number of pools
+        self.assertEqual(prom.query.call_count, 6)
+        for call in prom.query.call_args_list:
+            self.assertNotIn('resource="', call.kwargs["query"])
+
+    @mock.patch("grian_ui.datasource.prometheus.time.time", return_value=1e6)
+    def test_pool_silent_for_ten_minutes_is_stale(self, _time):
+        client, _ = _make_client(self._query_map(1e6 - 601))
+        self.assertTrue(client.get_storage_pools()[0]["stale"])
+
+    @override_settings(GRIAN_PLUGIN={"storage_stale_minutes": 30})
+    @mock.patch("grian_ui.datasource.prometheus.time.time", return_value=1e6)
+    def test_stale_minutes_setting(self, _time):
+        from grian_ui.datasource import prometheus
+
+        client, _ = _make_client(self._query_map(1e6 - 1200))
+        self.assertFalse(client.get_storage_pools()[0]["stale"])
+        client, _ = _make_client(self._query_map(1e6 - 1801))
+        self.assertTrue(client.get_storage_pools()[0]["stale"])
+        self.assertIn("[35m:30s]", prometheus.pool_last_seen_query())
+        self.assertEqual(prometheus.stale_window(), "30m")
+
+    def test_last_seen_query(self):
+        from grian_ui.datasource import prometheus
+
+        query = prometheus.pool_last_seen_query()
+        self.assertIn(
+            "timestamp(ceilometer_volume_provider_pool_capacity_total)", query
+        )
+        self.assertIn("[15m:30s]", query)
+        self.assertIn("[24h:5m]", query)
 
     def test_empty_result_returns_empty_list(self):
         client, prom = _make_client()
@@ -200,117 +221,136 @@ class GetStoragePoolsTests(base.TestCase):
 
         self.assertEqual(client.get_storage_pools(), [])
 
-    def test_exception_returns_empty_list(self):
+    def test_errors_are_raised(self):
         client, prom = _make_client()
         prom.query.side_effect = Exception("timeout")
 
-        self.assertEqual(client.get_storage_pools(), [])
+        self.assertRaises(Exception, client.get_storage_pools)
 
-    def test_missing_sub_metrics_default_to_zero(self):
-        pool_metric = _make_metric(5120.0, {"resource": "pool-01"})
+    def test_missing_sub_metrics(self):
         query_map = {
-            "ceilometer_volume_provider_pool_capacity_total": [pool_metric],
+            _pool_query("total"): [
+                _make_metric(5120.0, {"resource": "pool-01"})
+            ],
+            # a pool without a total is ignored
+            _pool_query("free"): [_make_metric(1.0, {"resource": "other"})],
         }
         client, _ = _make_client(query_map)
 
         result = client.get_storage_pools()
 
+        self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["allocated"], 0.0)
         self.assertEqual(result[0]["free"], 0.0)
         self.assertEqual(result[0]["provisioned"], 0.0)
+        self.assertIsNone(result[0]["virtual_free"])
+        self.assertIsNone(result[0]["last_seen"])
+        self.assertTrue(result[0]["stale"])
 
 
 class GetCapacityPredictionsTests(base.TestCase):
-    def test_pool_predicted_to_fill(self):
-        pool_metric = _make_metric(5120.0, {"resource": "pool-01"})
-        predict_query = (
-            'predict_linear(ceilometer_volume_provider_pool_capacity_free'
-            '{resource="pool-01"}[7d], 30 * 86400)'
-        )
-        query_map = {
-            "ceilometer_volume_provider_pool_capacity_total": [pool_metric],
-            'ceilometer_volume_provider_pool_capacity_free{resource="pool-01"}': [
-                _make_metric(1000.0)
-            ],
-            predict_query: [_make_metric(-500.0)],
+    def _query_map(self, free, free_30d, vfree, vfree_30d, history=8 * 86400):
+        from grian_ui.datasource import prometheus
+
+        def pool(value):
+            if value is None:
+                return []
+            return [_make_metric(value, {"resource": "pool-01"})]
+
+        return {
+            _pool_query("free", "10m"): pool(free),
+            _pool_query("virtual_free", "10m"): pool(vfree),
+            _predict_query("free"): pool(free_30d),
+            _predict_query("virtual_free"): pool(vfree_30d),
+            prometheus.pool_history_query(): pool(history),
         }
-        client, _ = _make_client(query_map)
+
+    def test_virtual_capacity_runs_out_first(self):
+        # thin pool: free stays flat, virtual free shrinks 100 GiB/day
+        client, prom = _make_client(
+            self._query_map(1000.0, 1000.0, 1500.0, -1500.0)
+        )
 
         result = client.get_capacity_predictions()
 
         self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["name"], "pool-01")
+        self.assertIsNone(result[0]["days_physical"])
+        self.assertEqual(result[0]["days_virtual"], 15.0)
+        self.assertEqual(result[0]["days_until_full"], 15.0)
+        self.assertEqual(result[0]["limiting"], "virtual")
         self.assertTrue(result[0]["will_run_out"])
-        self.assertIsNotNone(result[0]["days_until_full"])
-        self.assertEqual(result[0]["predicted_value"], -500.0)
-        self.assertEqual(result[0]["current_free"], 1000.0)
+        self.assertEqual(result[0]["history_days"], 7.0)
+        self.assertEqual(prom.query.call_count, 5)
 
-    def test_pool_not_predicted_to_fill(self):
-        pool_metric = _make_metric(5120.0, {"resource": "pool-01"})
-        predict_query = (
-            'predict_linear(ceilometer_volume_provider_pool_capacity_free'
-            '{resource="pool-01"}[7d], 30 * 86400)'
+    def test_physical_capacity_runs_out_first(self):
+        client, _ = _make_client(
+            self._query_map(1000.0, -2000.0, 5000.0, 2000.0)
         )
-        query_map = {
-            "ceilometer_volume_provider_pool_capacity_total": [pool_metric],
-            'ceilometer_volume_provider_pool_capacity_free{resource="pool-01"}': [
-                _make_metric(2000.0)
-            ],
-            predict_query: [_make_metric(1500.0)],
-        }
-        client, _ = _make_client(query_map)
 
-        result = client.get_capacity_predictions()
+        result = client.get_capacity_predictions()[0]
 
-        self.assertFalse(result[0]["will_run_out"])
-        self.assertIsNone(result[0]["days_until_full"])
+        self.assertEqual(result["days_physical"], 10.0)
+        self.assertEqual(result["days_virtual"], 50.0)
+        self.assertEqual(result["limiting"], "physical")
+        self.assertEqual(result["days_until_full"], 10.0)
 
-    def test_no_prediction_data(self):
-        pool_metric = _make_metric(5120.0, {"resource": "pool-01"})
-        query_map = {
-            "ceilometer_volume_provider_pool_capacity_total": [pool_metric],
-            'ceilometer_volume_provider_pool_capacity_free{resource="pool-01"}': [
-                _make_metric(2000.0)
-            ],
-        }
-        client, _ = _make_client(query_map)
+    def test_not_shrinking(self):
+        client, _ = _make_client(
+            self._query_map(2000.0, 2500.0, 3000.0, 3000.0)
+        )
 
-        result = client.get_capacity_predictions()
+        result = client.get_capacity_predictions()[0]
 
-        self.assertFalse(result[0]["will_run_out"])
-        self.assertIsNone(result[0]["predicted_value"])
+        self.assertFalse(result["will_run_out"])
+        self.assertIsNone(result["days_until_full"])
+        self.assertIsNone(result["limiting"])
 
-    def test_empty_total_returns_empty_list(self):
+    def test_pool_without_virtual_free(self):
+        client, _ = _make_client(self._query_map(1000.0, 700.0, None, None))
+
+        result = client.get_capacity_predictions()[0]
+
+        self.assertEqual(result["days_physical"], 100.0)
+        self.assertIsNone(result["days_virtual"])
+        self.assertIsNone(result["current_virtual_free"])
+        self.assertEqual(result["limiting"], "physical")
+
+    def test_insufficient_history(self):
+        client, _ = _make_client(
+            self._query_map(
+                1000.0, -2000.0, 5000.0, 2000.0, history=1.25 * 86400
+            )
+        )
+
+        result = client.get_capacity_predictions()[0]
+
+        self.assertFalse(result["enough_history"])
+        self.assertEqual(result["history_days"], 1.2)
+        self.assertFalse(result["will_run_out"])
+        self.assertIsNone(result["days_until_full"])
+
+    def test_empty_result_returns_empty_list(self):
         client, prom = _make_client()
         prom.query.return_value = None
 
         self.assertEqual(client.get_capacity_predictions(), [])
 
-    def test_exception_returns_empty_list(self):
+    def test_errors_are_raised(self):
         client, prom = _make_client()
         prom.query.side_effect = Exception("timeout")
 
-        self.assertEqual(client.get_capacity_predictions(), [])
+        self.assertRaises(Exception, client.get_capacity_predictions)
 
-    def test_days_until_full_calculation(self):
-        pool_metric = _make_metric(5120.0, {"resource": "pool-01"})
-        predict_query = (
-            'predict_linear(ceilometer_volume_provider_pool_capacity_free'
-            '{resource="pool-01"}[7d], 30 * 86400)'
-        )
-        query_map = {
-            "ceilometer_volume_provider_pool_capacity_total": [pool_metric],
-            'ceilometer_volume_provider_pool_capacity_free{resource="pool-01"}': [
-                _make_metric(1500.0)
-            ],
-            predict_query: [_make_metric(-1500.0)],
-        }
-        client, _ = _make_client(query_map)
-
-        result = client.get_capacity_predictions()
+    def test_days_until_zero(self):
+        from grian_ui.datasource import prometheus
 
         # decline_per_day = (1500 - (-1500)) / 30 = 100
-        # days_until_full = 1500 / 100 = 15.0
-        self.assertEqual(result[0]["days_until_full"], 15.0)
+        self.assertEqual(prometheus.days_until_zero(1500.0, -1500.0), 15.0)
+        self.assertEqual(prometheus.days_until_zero(0.0, -30.0), 0.0)
+        self.assertIsNone(prometheus.days_until_zero(10.0, 10.0))
+        self.assertIsNone(prometheus.days_until_zero(None, 1.0))
+        self.assertIsNone(prometheus.days_until_zero(1.0, None))
 
 
 class NumberTests(base.TestCase):
