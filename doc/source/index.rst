@@ -18,3 +18,4 @@ documentation for details.
    admin-volume-metrics
    admin-compute-host-health
    user-compute-host-health
+   admin-instance-health
