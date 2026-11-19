@@ -21,3 +21,5 @@ documentation for details.
    admin-instance-health
    admin-top-consumers
    user-top-consumers
+   admin-network-health
+   user-network-health

@@ -1,0 +1,27 @@
+{% load i18n %}
+{% if error_message %}
+<div class="panel-body">{% include "admin/network_health/_error.html" %}</div>
+{% elif not total %}
+<div class="nh-empty"><i class="fa fa-random" aria-hidden="true"></i>{% trans "No instance interface reports network metrics." %}</div>
+<div class="panel-body" style="padding-top: 0;">{% include "admin/network_health/_notes.html" %}</div>
+{% else %}
+<div class="table-responsive"><table class="table table-condensed nh-table">
+  <caption class="sr-only">{% trans "Drops and errors by project, most packets lost first" %}</caption>
+  <thead><tr><th scope="col">{% trans "Project" %}</th><th scope="col" class="text-right">{% trans "Interfaces" %}</th><th scope="col" class="text-right">{% trans "With drops/errors" %}</th><th scope="col" class="text-right">{% trans "Packets lost/s" %}</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr{% if row.lossy %} class="warning"{% endif %}>
+    <td>{{ row.project_name|default:_("(no project)") }}</td>
+    <td class="text-right">{{ row.interfaces }}</td>
+    <td class="text-right">{% if row.lossy %}<strong>{{ row.lossy }}</strong>{% else %}0{% endif %}</td>
+    <td class="text-right">{% if row.lossy %}{{ row.lost_pps|floatformat:"-2" }}{% else %}0{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<div class="panel-footer nh-muted">
+  {% blocktrans with lossy=lossy_total n=interfaces_total %}{{ lossy }} of {{ n }} interfaces dropped or failed packets in the last window.{% endblocktrans %}
+  {% if total > limit %}{% blocktrans with n=limit total=total %}{{ n }} of {{ total }} projects shown.{% endblocktrans %}{% endif %}
+  {% include "admin/network_health/_notes.html" %}
+</div>
+{% endif %}

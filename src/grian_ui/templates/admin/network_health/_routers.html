@@ -1,0 +1,37 @@
+{% load i18n %}
+{% if error_message %}
+<div class="panel-body">{% include "admin/network_health/_error.html" %}</div>
+{% elif not total %}
+<div class="nh-empty"><i class="fa fa-arrows-alt" aria-hidden="true"></i>{% trans "No routers in the cloud." %}</div>
+<div class="panel-body" style="padding-top: 0;">{% include "admin/network_health/_notes.html" %}</div>
+{% else %}
+<div class="table-responsive"><table class="table table-condensed nh-table">
+  <caption class="sr-only">{% trans "Routers of every project, problems first" %}</caption>
+  <thead><tr>
+    <th scope="col">{% trans "Router" %}</th><th scope="col">{% trans "Project" %}</th><th scope="col">{% trans "Status in Neutron" %}</th>
+    <th scope="col">{% trans "Gateway host" %}</th><th scope="col" class="text-right">{% trans "Instance ports behind" %}</th>
+    <th scope="col">{% trans "Quiet" %}</th><th scope="col">{% trans "Traffic now vs usual" %}</th><th scope="col">{% trans "Check" %}</th>
+  </tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr{% if row.state == "quiet" or row.state == "gateway_down" %} class="danger"{% elif row.state == "error" %} class="warning"{% endif %}>
+    <td><strong>{{ row.name|default:row.id }}</strong></td>
+    <td>{{ row.project_name }}</td>
+    <td>{{ row.status|default:"–" }}{% if not row.admin_up %} <span class="label label-default">{% trans "disabled" %}</span>{% endif %}</td>
+    <td>{% if row.gateway_host %}{{ row.gateway_host }}{% if row.gateway_down %} <span class="label label-danger"><i class="fa fa-times" aria-hidden="true"></i> {% trans "agent down" %}</span>{% endif %}{% else %}<span class="text-muted">{% trans "no gateway" %}</span>{% endif %}</td>
+    <td class="text-right">{% if row.instances is None %}<span class="text-muted">–</span>{% else %}{{ row.instances }}{% endif %}</td>
+    <td>{% if row.judged %}{% if row.quiet %}<strong class="text-danger">{% blocktrans with q=row.quiet n=row.judged %}{{ q }} of {{ n }}{% endblocktrans %}</strong>{% else %}{% blocktrans with n=row.judged %}0 of {{ n }}{% endblocktrans %}{% endif %}{% else %}<span class="text-muted">–</span>{% endif %}</td>
+    <td>{% if row.percent is None %}<span class="text-muted">–</span>{% else %}<span class="nh-ratio{% if row.percent < thresholds.quiet_percent %} nh-crit{% elif row.percent < 50 %} nh-warn{% endif %}" aria-hidden="true"><span style="width: {% if row.percent > 100 %}100{% else %}{{ row.percent }}{% endif %}%;"></span></span>{{ row.percent }}%{% endif %}</td>
+    <td>{% if row.state == "quiet" %}<span class="label label-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ row.state_label }}</span>{% elif row.state == "gateway_down" %}<span class="label label-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ row.state_label }}</span>{% elif row.state == "error" %}<span class="label label-warning"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {{ row.state_label }}</span>{% elif row.state == "ok" %}<span class="label label-success"><i class="fa fa-check-circle" aria-hidden="true"></i> {{ row.state_label }}</span>{% else %}<span class="text-muted">{{ row.state_label }}</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<div class="panel-footer nh-muted">
+  <i class="fa fa-info-circle" aria-hidden="true"></i>
+  {% trans "Neutron reports a router ACTIVE even when its gateway node is down: the Quiet column shows the data plane problem." %}
+  {% blocktrans with judged=judged_total total=total pps=thresholds.quiet_min_pps %}{{ judged }} of {{ total }} routers have enough traffic to judge (at least {{ pps }} packets/s per interface).{% endblocktrans %}
+  {% if total > limit %}{% blocktrans with n=limit total=total %}{{ n }} of {{ total }} routers shown.{% endblocktrans %}{% endif %}
+  {% include "admin/network_health/_notes.html" %}
+</div>
+{% endif %}

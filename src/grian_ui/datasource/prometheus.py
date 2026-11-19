@@ -19,6 +19,7 @@ from grian_ui import config
 from grian_ui import instance_health
 from grian_ui import inventory
 from grian_ui import timeseries
+from grian_ui.datasource import prometheus_network
 from grian_ui.datasource.api import DatasourceClient
 
 
@@ -868,6 +869,18 @@ class PrometheusTelemetryClient(DatasourceClient):
             range_key=range_key,
             at=at,
         )
+
+    # Network health (queries in grian_ui.datasource.prometheus_network)
+
+    def get_network_interfaces(self) -> dict:
+        """Get the per-interface packet rates and the cloud traffic."""
+        return prometheus_network.get_interfaces(self)
+
+    def get_network_traffic_trend(
+        self, range_key: str, at: float = None
+    ) -> dict:
+        """Get the cloud traffic trend (one query)."""
+        return prometheus_network.get_traffic_trend(self, range_key, at)
 
 
 def _empty_details():

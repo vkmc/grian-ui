@@ -16,6 +16,7 @@ from datetime import datetime
 from grian_ui import compute_health
 from grian_ui import instance_health
 from grian_ui import timeseries
+from grian_ui.datasource import fake_network
 from grian_ui.datasource.api import DatasourceClient
 
 
@@ -400,6 +401,18 @@ class FakeTelemetryClient(DatasourceClient):
         return fake_top_consumers.get_trend(
             resource, by, keys, project_id, range_key, at
         )
+
+    # Network health (sample data in grian_ui.datasource.fake_network)
+
+    def get_network_interfaces(self) -> dict:
+        """Get sample interface rates (see fake_network)."""
+        return fake_network.fake_interfaces()
+
+    def get_network_traffic_trend(
+        self, range_key: str, at: float = None
+    ) -> dict:
+        """Get a sample cloud traffic trend."""
+        return fake_network.fake_traffic_trend(range_key, at)
 
 
 def _make_fake_hosts():

@@ -308,3 +308,77 @@ def get_openstack_keystone_url():
 def get_openstack_endpoint_type():
     """Get OpenStack endpoint type (interface) from settings."""
     return getattr(settings, "OPENSTACK_ENDPOINT_TYPE", "publicURL")
+
+
+#: Default network health thresholds.
+DEFAULT_NETWORK_HEALTH_THRESHOLDS = {
+    # an interface behind a router is quiet when its inbound packet rate
+    # fell below this share of its rate at the same time a week before,
+    # percent (less than 100)
+    "quiet_percent": 10,
+    # interfaces whose usual inbound rate is lower are too bursty to call
+    # quiet, packets/s
+    "quiet_min_pps": 0.5,
+    # an interface drops packets above this rate of dropped + failed
+    # packets (both directions), packets/s
+    "packet_loss": 0,
+}
+
+#: Default window of the network health rate() calls. Must hold at least
+#: two samples, so at least twice the Ceilometer polling interval (300 s
+#: by default; DevStack polls more often).
+DEFAULT_NETWORK_HEALTH_RATE_WINDOW = "10m"
+_NETWORK_RATE_WINDOW_RE = re.compile(r"([1-9][0-9]*)([mh])")
+
+
+def get_network_health_thresholds():
+    """
+    Get the network health thresholds.
+
+    Defaults (DEFAULT_NETWORK_HEALTH_THRESHOLDS) can be overridden per key
+    with ``GRIAN_PLUGIN['network_health_thresholds']``. See
+    get_thresholds().
+
+    Raises:
+        ConfigurationError: If an override is unknown or out of range
+    """
+    thresholds = get_thresholds(
+        "network_health_thresholds", DEFAULT_NETWORK_HEALTH_THRESHOLDS
+    )
+    if thresholds["quiet_percent"] >= 100:
+        raise ConfigurationError(
+            "GRIAN_PLUGIN['network_health_thresholds']['quiet_percent'] "
+            "must be less than 100, got "
+            f"{thresholds['quiet_percent']!r}"
+        )
+    return thresholds
+
+
+def get_network_health_rate_window():
+    """
+    Get the window of the network health rate() calls, e.g. ``"10m"``.
+
+    Override with ``GRIAN_PLUGIN['network_health_rate_window']`` (minutes
+    or hours, at most 6h). Use at least twice the Ceilometer polling
+    interval.
+
+    Raises:
+        ConfigurationError: If the value is not a valid window
+    """
+    value = _get_grian_plugin_config().get(
+        "network_health_rate_window", DEFAULT_NETWORK_HEALTH_RATE_WINDOW
+    )
+    match = (
+        _NETWORK_RATE_WINDOW_RE.fullmatch(value)
+        if isinstance(value, str)
+        else None
+    )
+    minutes = None
+    if match:
+        minutes = int(match.group(1)) * (60 if match.group(2) == "h" else 1)
+    if minutes is None or minutes > 360:
+        raise ConfigurationError(
+            "GRIAN_PLUGIN['network_health_rate_window'] must be a duration "
+            f"in minutes or hours up to 6h, such as '10m', got {value!r}"
+        )
+    return value
