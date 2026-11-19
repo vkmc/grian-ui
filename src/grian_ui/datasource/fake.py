@@ -10,6 +10,7 @@ import random  # nosec
 
 from datetime import datetime
 
+from grian_ui.datasource import fake_network
 from grian_ui.datasource.api import DatasourceClient
 
 
@@ -98,6 +99,18 @@ class FakeTelemetryClient(DatasourceClient):
                 "will_run_out": True,
             },
         ]
+
+    # Network health (sample data in grian_ui.datasource.fake_network)
+
+    def get_network_interfaces(self) -> dict:
+        """Get sample interface rates (see fake_network)."""
+        return fake_network.fake_interfaces()
+
+    def get_network_traffic_trend(
+        self, range_key: str, at: float = None
+    ) -> dict:
+        """Get a sample cloud traffic trend."""
+        return fake_network.fake_traffic_trend(range_key, at)
 
 
 def get_client(request=None) -> DatasourceClient:
