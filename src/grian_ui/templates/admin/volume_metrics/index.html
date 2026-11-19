@@ -17,27 +17,6 @@
 .metrics-section {
   margin-bottom: 25px;
 }
-.pool-capacity-bar {
-  height: 20px;
-  background-color: #f5f5f5;
-  border-radius: 4px;
-  overflow: hidden;
-  position: relative;
-}
-.pool-capacity-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #5cb85c 0%, #5bc0de 100%);
-  transition: width 0.3s ease;
-}
-.pool-capacity-text {
-  position: absolute;
-  width: 100%;
-  text-align: center;
-  line-height: 20px;
-  font-size: 0.85em;
-  font-weight: 600;
-  color: #333;
-}
 .vm-muted { color: #595959; font-size: 12px; }
 .vm-note { margin: 6px 0 0; }
 .vm-loading { padding: 25px; text-align: center; color: #666; }
@@ -82,6 +61,30 @@
 .vm-how > summary .panel-title { display: inline; }
 .vm-how-table th, .vm-how-table td { padding: 3px 12px 3px 0; vertical-align: top; }
 .vm-how-table th[scope="row"] { white-space: nowrap; }
+#vm-root .btn-group .btn.active { background-color: #1a4f80; border-color: #1a4f80; color: #fff; font-weight: 600; }
+#vm-root .vm-pair { display: flex; flex-wrap: wrap; }
+#vm-root .vm-pair::before, #vm-root .vm-pair::after { display: none; }
+#vm-root .vm-pair > [class*="col-"] { display: flex; }
+#vm-root .vm-pair > [class*="col-"] > .panel { flex: 1; }
+#vm-root .label { display: inline-block; box-sizing: border-box; height: 20px; line-height: 20px; padding-top: 0; padding-bottom: 0; vertical-align: middle; }
+#vm-root .label .fa { font-size: 11px; line-height: inherit; vertical-align: top; }
+.vm-chart { position: relative; height: 240px; }
+.vm-legend { margin-bottom: 6px; font-size: 12px; }
+.vm-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 3px 0 10px; vertical-align: middle; }
+/* use bars: a bar on a white track, at least 3:1 against white */
+.vm-ratio { display: inline-block; width: 70px; height: 10px; border: 1px solid #767676; border-radius: 2px; background: #fff; vertical-align: middle; margin-right: 6px; padding: 1px; }
+.vm-ratio > span { display: block; height: 100%; background: #1f4e79; }
+.vm-ratio.vm-critical > span { background: #b52b27; }
+.vm-ratio.vm-warning > span { background: #a35c00; }
+.vm-twobar { white-space: nowrap; }
+.vm-strip { display: flex; gap: 1px; height: 14px; min-width: 160px; }
+.vm-strip > span { flex: 1; border-radius: 1px; }
+.vm-strip .vm-up { background: #2b7a2b; }
+.vm-strip .vm-down { background: #b52b27; }
+.vm-strip .vm-none { background: #ddd; }
+.vm-kv td { padding: 4px 12px 4px 0; vertical-align: top; }
+.vm-linkbtn { padding: 0; border: 0; background: none; color: #1f6f8b; font-weight: 600; }
+.vm-linkbtn:hover, .vm-linkbtn:focus { text-decoration: underline; }
 </style>
 
 <script>
@@ -95,10 +98,49 @@ vm.formatAge = function (ts) {
   if (s < 3600) { return '{% filter escapejs %}{% trans "from %(n)s min ago" %}{% endfilter %}'.replace('%(n)s', Math.round(s / 60)); }
   return '{% filter escapejs %}{% trans "from %(n)s h ago" %}{% endfilter %}'.replace('%(n)s', (s / 3600).toFixed(1));
 };
+vm.formatAgo = function (ts) {
+  var s = Math.max(0, Math.round(Date.now() / 1000 - ts));
+  if (s < 60) { return '{% filter escapejs %}{% trans "%(n)s s ago" %}{% endfilter %}'.replace('%(n)s', s); }
+  if (s < 3600) { return '{% filter escapejs %}{% trans "%(n)s min ago" %}{% endfilter %}'.replace('%(n)s', Math.round(s / 60)); }
+  return '{% filter escapejs %}{% trans "%(n)s h ago" %}{% endfilter %}'.replace('%(n)s', (s / 3600).toFixed(1));
+};
+vm.formatTick = function (ts, range) {
+  var d = new Date(ts * 1000);
+  return range === '24h' ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit' });
+};
+vm.readJson = function (id) {
+  var el = document.getElementById(id);
+  return el ? JSON.parse(el.textContent) : null;
+};
+vm.charts = vm.charts || {};
+vm.replaceChart = function (key, canvas, config) {
+  if (vm.charts[key]) { vm.charts[key].destroy(); }
+  vm.charts[key] = canvas ? new Chart(canvas, config) : null;
+};
+vm.destroyChart = function (key) {
+  if (vm.charts[key]) { vm.charts[key].destroy(); vm.charts[key] = null; }
+};
+// chart colours meet the 3:1 contrast WCAG asks for graphics on white
+vm.colors = ['#337ab7', '#b0417a', '#2b7a2b', '#a35c00', '#6f42c1'];
+vm.setChoice = function (group, input, value, eventName) {
+  document.getElementById(input).value = value;
+  document.querySelectorAll('#' + group + ' button').forEach(function (b) {
+    var active = b.getAttribute('data-value') === value;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  htmx.trigger(document.body, eventName);
+};
 // times are shown in the browser's time zone
 vm.showClocks = function (root) {
   root.querySelectorAll('.vm-clock').forEach(function (el) {
     el.textContent = vm.formatClock(parseInt(el.getAttribute('data-ts'), 10));
+  });
+  root.querySelectorAll('.vm-ago').forEach(function (el) {
+    var ts = parseInt(el.getAttribute('data-ts'), 10);
+    el.textContent = vm.formatAgo(ts);
+    el.title = new Date(ts * 1000).toLocaleString();
   });
   root.querySelectorAll('.vm-age').forEach(function (el) {
     var ts = parseInt(el.getAttribute('data-ts'), 10);
@@ -132,9 +174,24 @@ document.addEventListener('visibilitychange', function () {
 <div class="alert alert-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ config_error }}</div>
 {% endif %}
 <div id="vm-root" hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
+<form id="vm-controls" onsubmit="return false;">
+  <input type="hidden" name="range" id="vm-range" value="{{ default_range }}">
+  <input type="hidden" name="view" id="vm-view" value="cloud">
+  <input type="hidden" name="sort" id="vm-sort" value="soon">
+</form>
 
 <div class="row vm-toolbar">
-  <div class="col-sm-12 text-right vm-muted">
+  <div class="col-sm-8">
+    <div class="btn-group btn-group-sm" role="group" aria-label="{% trans 'Time range' %}" id="vm-range-buttons">
+      {% for range in ranges %}
+      <button type="button" class="btn btn-default{% if range == default_range %} active{% endif %}"
+              data-value="{{ range }}" aria-pressed="{% if range == default_range %}true{% else %}false{% endif %}"
+              onclick="vm.setChoice('vm-range-buttons', 'vm-range', '{{ range }}', 'vm-chart')">{{ range }}</button>
+      {% endfor %}
+    </div>
+    <span class="vm-muted" style="margin-left: 8px;">{% blocktrans with minutes=stale_minutes|default:10 %}Range for the capacity chart. Problems use the last {{ minutes }} minutes.{% endblocktrans %}</span>
+  </div>
+  <div class="col-sm-4 text-right vm-muted" style="line-height: 30px;">
     <i class="fa fa-refresh" aria-hidden="true"></i>
     {% blocktrans with seconds=refresh_seconds %}Refreshes every {{ seconds }}s{% endblocktrans %}
   </div>
@@ -146,7 +203,7 @@ document.addEventListener('visibilitychange', function () {
      hx-get="{% url 'horizon:admin:volume_metrics:metrics_update' %}"
      hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], vm-refresh from:body, vm-retry"
      hx-swap="innerHTML">
-  <div class="col-sm-12 vm-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+  <div class="col-sm-12"><div class="vm-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
 </div>
 
 <!-- Volumes and snapshots needing attention -->
@@ -164,112 +221,112 @@ document.addEventListener('visibilitychange', function () {
   </div>
 </div>
 
-<div class="row metrics-section">
-  <!-- Storage Pools -->
-  <div class="col-md-12">
-    <div class="panel panel-default">
-      <div class="panel-heading">
-        <h3 class="panel-title">
-          <i class="fa fa-server"></i> {% trans "Storage Pools" %}
-        </h3>
-      </div>
-      <div class="panel-body">
-        {% if error_message %}
-          {% include "admin/volume_metrics/_error.html" %}
-        {% elif storage_pools %}
-          {% for pool in storage_pools %}
-          <div style="margin-bottom: 20px;">
-            <div style="margin-bottom: 5px;">
-              <strong>{{ pool.name }}</strong>
-              {% if pool.stale %}<span class="label label-warning"><i class="fa fa-eye-slash" aria-hidden="true"></i> {% trans "Stale" %}</span>{% endif %}
-              <span class="pull-right text-muted">
-                {% trans "Allocated" %}: {{ pool.allocated|floatformat:2 }} / {{ pool.total|floatformat:2 }} GiB {% trans "Total" %}
-              </span>
-            </div>
-            <div class="pool-capacity-bar">
-              <div class="pool-capacity-fill" style="width: {{ pool.usage_percent }}%;"></div>
-              <div class="pool-capacity-text">{{ pool.usage_percent }}% {% trans "allocated" %}</div>
-            </div>
-            <div style="margin-top: 5px; font-size: 0.85em; color: #666;">
-              <span><i class="fa fa-check-circle text-success"></i> {% trans "Free" %}: {{ pool.free|floatformat:2 }} GiB</span>
-              <span style="margin-left: 15px;"><i class="fa fa-hdd-o text-info"></i> {% trans "Provisioned" %}: {{ pool.provisioned|floatformat:2 }} GiB</span>
-              {% if pool.stale %}<br><span class="pool-stale"><i class="fa fa-eye-slash" aria-hidden="true"></i> {% if pool.last_seen %}{% blocktrans with ts=pool.last_seen_ts %}No report since <span class="vm-clock" data-ts="{{ ts }}"></span>: values frozen at the last report (is its cinder-volume service running?){% endblocktrans %}{% else %}{% trans "No recent report: values frozen at the last report (is its cinder-volume service running?)" %}{% endif %}</span>{% endif %}
-            </div>
-          </div>
-          {% endfor %}
-          {% include "admin/volume_metrics/_notes.html" %}
-        {% else %}
-          <p class="text-muted text-center" style="padding: 20px;">
-            <i class="fa fa-info-circle"></i> {% trans "No storage pools found." %}
-          </p>
-        {% endif %}
-      </div>
+<!-- Capacity over time -->
+<div class="panel panel-default metrics-section">
+  <div class="panel-heading">
+    <h3 class="panel-title" style="display: inline-block;"><i class="fa fa-area-chart" aria-hidden="true"></i> {% trans "Capacity over time" %}</h3>
+    <div class="btn-group btn-group-xs pull-right" role="group" aria-label="{% trans 'Chart' %}" id="vm-view-buttons">
+      <button type="button" class="btn btn-default active" data-value="cloud" aria-pressed="true" onclick="vm.setChoice('vm-view-buttons', 'vm-view', 'cloud', 'vm-chart')">{% trans "Whole cloud" %}</button>
+      <button type="button" class="btn btn-default" data-value="pools" aria-pressed="false" onclick="vm.setChoice('vm-view-buttons', 'vm-view', 'pools', 'vm-chart')">{% trans "Fullest pools" %}</button>
     </div>
   </div>
-</div>
-
-<!-- Capacity Forecast Panel -->
-<div class="row metrics-section">
-  <div class="col-sm-12"
-       id="capacity-prediction"
-       hx-get="{% url 'horizon:admin:volume_metrics:capacity_prediction' %}"
-       hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], vm-refresh from:body, vm-retry"
+  <div class="panel-body"
+       hx-get="{% url 'horizon:admin:volume_metrics:capacity' %}"
+       hx-include="#vm-controls"
+       hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], vm-refresh from:body, vm-retry, vm-chart from:body"
        hx-swap="innerHTML">
     <div class="vm-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
   </div>
 </div>
 
-<!-- Detailed Pool Information Table (expandable) -->
-<div class="row">
-  <div class="col-sm-12">
-    <div class="panel panel-default">
-      <div class="panel-heading" style="cursor: pointer;" onclick="togglePoolDetails()">
-        <h3 class="panel-title">
-          <i class="fa fa-table"></i> {% trans "Detailed Pool Information" %}
-          <span class="pull-right"><i class="fa fa-chevron-up" id="pool-toggle-icon"></i></span>
-        </h3>
+{# Pools: replaces the former Storage Pools, Capacity Forecast and Detailed Pool Information panels. #}
+<div class="panel panel-default metrics-section">
+  <div class="panel-heading">
+    <h3 class="panel-title" style="display: inline-block;"><i class="fa fa-server" aria-hidden="true"></i> {% trans "Pools" %}
+      <span class="vm-bounded">{% blocktrans with n=pool_limit %}top {{ n }}{% endblocktrans %}</span></h3>
+    <div class="btn-group btn-group-xs pull-right" role="group" aria-label="{% trans 'Sort pools' %}" id="vm-sort-buttons">
+      <button type="button" class="btn btn-default active" data-value="soon" aria-pressed="true" onclick="vm.setChoice('vm-sort-buttons', 'vm-sort', 'soon', 'vm-sort')">{% trans "Soonest full" %}</button>
+      <button type="button" class="btn btn-default" data-value="full" aria-pressed="false" onclick="vm.setChoice('vm-sort-buttons', 'vm-sort', 'full', 'vm-sort')">{% trans "Fullest" %}</button>
+      <button type="button" class="btn btn-default" data-value="stale" aria-pressed="false" onclick="vm.setChoice('vm-sort-buttons', 'vm-sort', 'stale', 'vm-sort')">{% trans "Stale first" %}</button>
+    </div>
+  </div>
+  <div hx-get="{% url 'horizon:admin:volume_metrics:pools' %}"
+       hx-include="#vm-controls"
+       hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], vm-refresh from:body, vm-retry, vm-sort from:body"
+       hx-swap="innerHTML">
+    <div class="vm-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+  </div>
+  <div class="panel-body" style="border-top: 1px solid #ddd;">
+    <form class="form-inline" id="vm-lookup-form"
+          hx-get="{% url 'horizon:admin:volume_metrics:pool_lookup' %}"
+          hx-target="#vm-lookup-result"
+          hx-trigger="submit, every {{ refresh_seconds }}s [document.visibilityState === 'visible' &amp;&amp; document.getElementById('vm-lookup').value]">
+      <label class="sr-only" for="vm-lookup">{% trans "Pool name" %}</label>
+      <input type="search" class="form-control input-sm" id="vm-lookup" name="name" list="vm-pool-names" maxlength="255" autocomplete="off"
+             placeholder="{% trans 'Pool name, e.g. host@backend#pool' %}" style="width: 300px;"
+             hx-get="{% url 'horizon:admin:volume_metrics:pool_suggestions' %}" hx-trigger="input changed delay:300ms" hx-target="#vm-pool-names" hx-swap="innerHTML">
+      <datalist id="vm-pool-names"></datalist>
+      <button class="btn btn-primary btn-sm" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {% trans "Show" %}</button>
+      <span class="vm-muted" style="margin-left: 8px;">{% trans "Any pool, also outside the top 10." %}</span>
+    </form>
+    <div id="vm-lookup-result" aria-live="polite"></div>
+  </div>
+</div>
+
+<div class="row vm-pair">
+  <div class="col-md-7">
+    <div class="panel panel-default metrics-section">
+      <div class="panel-heading">
+        <h3 class="panel-title"><i class="fa fa-heartbeat" aria-hidden="true"></i> {% trans "Cinder services" %}
+          <span class="vm-src">ceilometer_volume_service_health</span></h3>
       </div>
-      <div class="panel-body" id="pool-details-table" style="display: block;">
-        {% if error_message %}
-        {% include "admin/volume_metrics/_error.html" %}
-        {% elif storage_pools %}
-        <div class="table-responsive">
-          <table class="table table-striped table-hover">
-            <thead>
-              <tr>
-                <th>{% trans "Pool Name" %}</th>
-                <th class="text-right">{% trans "Total (GiB)" %}</th>
-                <th class="text-right">{% trans "Allocated (GiB)" %}</th>
-                <th class="text-right">{% trans "Free (GiB)" %}</th>
-                <th class="text-right">{% trans "Provisioned (GiB)" %}</th>
-                <th class="text-right">{% trans "Virtual Free (GiB)" %}</th>
-                <th class="text-right">{% trans "Usage %" %}</th>
-                <th class="text-right">{% trans "Last Report" %}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for pool in storage_pools %}
-              <tr>
-                <td><strong>{{ pool.name }}</strong></td>
-                <td class="text-right">{{ pool.total|floatformat:2 }}</td>
-                <td class="text-right">{{ pool.allocated|floatformat:2 }}</td>
-                <td class="text-right">{{ pool.free|floatformat:2 }}</td>
-                <td class="text-right">{{ pool.provisioned|floatformat:2 }}</td>
-                <td class="text-right">{% if pool.virtual_free is not None %}{{ pool.virtual_free|floatformat:2 }}{% else %}<span class="text-muted">{% trans "N/A" %}</span>{% endif %}</td>
-                <td class="text-right">
-                  <span class="label {% if pool.physical_level == "critical" %}label-danger{% elif pool.physical_level == "warning" %}label-warning{% else %}label-success{% endif %}">
-                    {{ pool.usage_percent }}%
-                  </span>
-                </td>
-                <td class="text-right">{% if pool.last_seen %}<span class="vm-clock{% if pool.stale %} pool-stale{% endif %}" data-ts="{{ pool.last_seen_ts }}"></span>{% else %}<span class="text-muted">–</span>{% endif %}{% if pool.stale %} <span class="label label-warning">{% trans "Stale" %}</span>{% endif %}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <p class="text-muted text-center">{% trans "No storage pools found." %}</p>
-        {% endif %}
+      <div hx-get="{% url 'horizon:admin:volume_metrics:services' %}"
+           hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], vm-refresh from:body, vm-retry"
+           hx-swap="innerHTML">
+        <div class="vm-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-5">
+    <div class="panel panel-default metrics-section">
+      <div class="panel-heading">
+        <h3 class="panel-title"><i class="fa fa-database" aria-hidden="true"></i> {% trans "Backends" %}
+          <span class="vm-bounded">{% trans "sum of their pools" %}</span></h3>
+      </div>
+      <div hx-get="{% url 'horizon:admin:volume_metrics:backends' %}"
+           hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], vm-refresh from:body, vm-retry"
+           hx-swap="innerHTML">
+        <div class="vm-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row vm-pair">
+  <div class="col-md-7">
+    <div class="panel panel-default metrics-section">
+      <div class="panel-heading">
+        <h3 class="panel-title"><i class="fa fa-users" aria-hidden="true"></i> {% trans "Usage by project" %}
+          <span class="vm-src">{% trans "Block Storage API" %}</span>
+          <span class="vm-bounded">{% blocktrans with n=project_limit %}top {{ n }}{% endblocktrans %}</span></h3>
+      </div>
+      <div hx-get="{% url 'horizon:admin:volume_metrics:projects' %}"
+           hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], vm-refresh from:body, vm-retry"
+           hx-swap="innerHTML">
+        <div class="vm-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-5">
+    <div class="panel panel-default metrics-section">
+      <div class="panel-heading">
+        <h3 class="panel-title"><i class="fa fa-clone" aria-hidden="true"></i> {% trans "Images and backups" %}</h3>
+      </div>
+      <div class="panel-body"
+           hx-get="{% url 'horizon:admin:volume_metrics:images' %}"
+           hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], vm-refresh from:body, vm-retry"
+           hx-swap="innerHTML">
+        <div class="vm-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
       </div>
     </div>
   </div>
@@ -289,6 +346,9 @@ document.addEventListener('visibilitychange', function () {
       <tr><th scope="row">{% trans "Stale pool" %}</th><td>{% blocktrans with minutes=stale_minutes %}No report in the last {{ minutes }} minutes (<code>GRIAN_PLUGIN['storage_stale_minutes']</code>) but one in the last 24 hours: its values are frozen at its last report, it is not forecast, and it is at least a warning.{% endblocktrans %}</td></tr>
       <tr><th scope="row">{% trans "Needing attention" %}</th><td>{% blocktrans with minutes=thresholds.stuck_minutes days=thresholds.unattached_days snap=thresholds.old_snapshot_days limit=attention_limit stored=attention_store_limit %}Block Storage API, all projects, the worst {{ limit }} rows shown (up to {{ stored }} kept in the shared summary, counts exact). Critical: <code>error</code>, <code>error_deleting</code>, <code>error_restoring</code>, <code>error_extending</code>. Warning: <code>creating</code>, <code>attaching</code>, <code>detaching</code>, <code>deleting</code> for more than {{ minutes }} minutes (since the last update). Clean-up: volumes available and unattached, unchanged for {{ days }} days or more; snapshots older than {{ snap }} days with a newer one of the same volume.{% endblocktrans %}</td></tr>
       <tr><th scope="row">{% trans "Block Storage API data" %}</th><td>{% blocktrans with minutes=inventory_minutes seconds=refresh_seconds %}Every volume and snapshot of every project is listed once per region every {{ minutes }} minutes (two listings following every page, like Instance Health reads the Compute API) and summarized; every section and administrator shares that summary, so page refreshes (every {{ seconds }} s) never call the Block Storage API, and state changes can show up that late. Project names come from the Identity API.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Capacity over time" %}</th><td>{% blocktrans with n=chart_pools stale=stale_minutes %}Whole cloud: <code>sum(max by (resource) (last_over_time(…_{allocated,provisioned,total}[{{ stale }}m])))</code> as one subquery (24h: every 15 min, 7d: every hour, 14d: every 2 hours). Fullest pools: allocated ÷ total of the {{ n }} pools with the highest physical use now.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Services, backends" %}</th><td>{% blocktrans with minutes=history_minutes stale=stale_minutes %}<code>ceilometer_volume_service_health</code> (1 up, 0 down) over the last {{ stale }} minutes; the 24-hour strip is the lowest value per 15 minutes, recomputed every {{ minutes }} minutes. A service without a report for {{ stale }} minutes is "no report". Backends are their pools summed (<code>host@backend</code>), with over-subscription = provisioned ÷ total.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Projects, images, backups" %}</th><td>{% trans "Usage by project: volumes and snapshots of the Block Storage API listing, per project. Images: <code>ceilometer_image_size</code>; downloads: distinct images in <code>ceilometer_image_download</code> over 24 hours; backups: <code>ceilometer_volume_backup_size</code> (needs the cinder-backup service)." %}</td></tr>
       <tr><th scope="row">{% trans "Refresh and errors" %}</th><td>{% trans "If a source fails, the last good data is shown with the time it was fetched, and the page retries at the next refresh. Data older than its refresh interval plus 30 seconds is flagged as possibly out of date." %}</td></tr>
     </table>
     <p class="vm-muted" style="margin: 8px 0 0;">{% trans "Thresholds can be overridden in <code>local_settings</code> with <code>GRIAN_PLUGIN['storage_thresholds']</code>. The panel keeps its URL (<code>/admin/volume_metrics/</code>) so existing links and bookmarks still work." %}</p>
@@ -296,18 +356,5 @@ document.addEventListener('visibilitychange', function () {
 </details>
 {% endif %}
 
-<script>
-function togglePoolDetails() {
-  var details = document.getElementById('pool-details-table');
-  var icon = document.getElementById('pool-toggle-icon');
-  if (details.style.display === 'none') {
-    details.style.display = 'block';
-    icon.className = 'fa fa-chevron-up';
-  } else {
-    details.style.display = 'none';
-    icon.className = 'fa fa-chevron-down';
-  }
-}
-</script>
 </div>
 {% endblock %}

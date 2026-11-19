@@ -1,0 +1,18 @@
+---
+features:
+  - |
+    Storage Health (the Volume Metrics panel) now shows capacity over time
+    (the whole cloud's allocated, provisioned and total capacity, or the
+    physical use of the five fullest pools, over 24 hours, 7 days or 14
+    days), one pools table (top 10 by soonest full, fullest or stale, with
+    physical and virtual use, forecast and last report, plus a look-up for
+    any pool) replacing the Storage Pools, Capacity Forecast and Detailed
+    Pool Information panels, the Cinder services with a 24-hour
+    availability strip (from ``ceilometer_volume_service_health``; a
+    service down makes the verdict critical), backends (their pools summed,
+    with over-subscription), usage by project (top 10, linking to the
+    project's volumes in Admin > Volume > Volumes) and image and volume
+    backup totals. A service without a report within
+    ``GRIAN_PLUGIN['storage_stale_minutes']`` (10 minutes by default) counts
+    as down. The number of queries does not depend on the size of the
+    cloud.

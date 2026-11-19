@@ -1,0 +1,27 @@
+{% load i18n %}
+{% if error_message %}
+<div class="panel-body">{% include "admin/volume_metrics/_error.html" %}</div>
+{% elif not rows %}
+<div class="vm-empty"><i class="fa fa-database" aria-hidden="true"></i>{% trans "No storage pools reported in the last 24 hours." %}</div>
+<div class="panel-footer vm-muted">{% include "admin/volume_metrics/_notes.html" %}</div>
+{% else %}
+<div class="table-responsive"><table class="table table-condensed vm-table">
+  <caption class="sr-only">{% trans "Backends: their pools summed" %}</caption>
+  <thead><tr><th scope="col">{% trans "Backend" %}</th><th scope="col" class="text-right">{% trans "Pools" %}</th><th scope="col" class="text-right">{% trans "Total (GiB)" %}</th><th scope="col">{% trans "Over-subscription" %}</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr{% if row.service_down %} class="danger"{% endif %}>
+    <td><strong>{{ row.name }}</strong>{% if row.service_down %} <span class="label label-danger">{% trans "service down" %}</span>{% elif row.stale %} <span class="label label-warning">{% trans "stale" %}</span>{% endif %}</td>
+    <td class="text-right">{{ row.pools }}</td>
+    <td class="text-right">{{ row.total|floatformat:"-1" }}</td>
+    <td>{% if row.oversubscription is not None %}<span class="vm-ratio" aria-hidden="true"><span style="width: {{ row.ratio_width }}%;"></span></span>{{ row.oversubscription|floatformat:2 }}×{% else %}–{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<div class="panel-footer vm-muted">
+  {% trans "Over-subscription is provisioned ÷ total: above 1× is normal with thin provisioning." %}
+  {% if total > limit %}{% blocktrans with n=limit total=total %}{{ n }} of {{ total }} backends shown.{% endblocktrans %}{% endif %}
+  {% include "admin/volume_metrics/_notes.html" %}
+</div>
+{% endif %}

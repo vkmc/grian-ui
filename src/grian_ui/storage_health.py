@@ -252,7 +252,7 @@ def summarize_inventory(
         ``volumes_attention`` (volumes and snapshots needing an operator:
         critical or warning) and ``unattached_soon``: up to SOON_LIMIT
         unattached volumes not yet old enough for clean-up, longest first
-        (``{"name", "days"}``).
+        (``{"name", "days"}``), and ``projects``: project_usage().
     """
     stuck = thresholds["stuck_minutes"] * 60
     unattached = thresholds["unattached_days"] * 86400
@@ -335,10 +335,11 @@ def summarize_inventory(
         "snapshots_total": len(snapshots),
         "volumes_attention": counts[LEVEL_CRITICAL] + counts[LEVEL_WARNING],
         "unattached_soon": soon[:SOON_LIMIT],
+        "projects": project_usage(volumes, snapshots),
     }
 
 
-def summarize(pools, inventory, thresholds):
+def summarize(pools, inventory, thresholds, services=()):
     """
     Verdict and summary cards.
 
@@ -347,6 +348,7 @@ def summarize(pools, inventory, thresholds):
         inventory: summarize_inventory() result, or None when the Block
             Storage API data is not available
         thresholds: config.get_storage_thresholds()
+        services: ``get_volume_services()`` entries
 
     Returns:
         dict: totals, card levels and ``verdict`` (``key``, ``level``,
@@ -368,7 +370,10 @@ def summarize(pools, inventory, thresholds):
     filling = [p for p in fresh if p["level"] == LEVEL_WARNING]
     counts = inventory["counts"] if inventory else {}
 
-    if full:
+    down = services_down(services)
+    if down:
+        verdict = (VERDICT_SERVICE_DOWN, LEVEL_CRITICAL, [])
+    elif full:
         verdict = (VERDICT_POOLS_FULL, LEVEL_CRITICAL, full)
     elif stale:
         verdict = (VERDICT_POOLS_STALE, LEVEL_WARNING, stale)
@@ -381,6 +386,10 @@ def summarize(pools, inventory, thresholds):
     else:
         verdict = (VERDICT_HEALTHY, LEVEL_OK, [])
     key, level, named = verdict
+    names = [p["name"] for p in named[:NAME_LIMIT]]
+    if key == VERDICT_SERVICE_DOWN:
+        named = down
+        names = [_("%(binary)s on %(host)s") % s for s in down[:NAME_LIMIT]]
     # forecasts need FORECAST_HISTORY: say how much the pools have
     short = [
         p["forecast"]["history_days"]
@@ -413,9 +422,29 @@ def summarize(pools, inventory, thresholds):
         "verdict": {
             "key": key,
             "level": level,
-            "names": [p["name"] for p in named[:NAME_LIMIT]],
+            "names": names,
             "count": len(named),
         },
+        "services_total": len(services),
+        "services_down": len(down),
+        "soonest": _soonest(fresh),
+    }
+
+
+def _soonest(pools):
+    """The pool forecast to be full first (reporting now), or None."""
+    forecast = [
+        p
+        for p in pools
+        if p["forecast"] and p["forecast"].get("days_until_full") is not None
+    ]
+    if not forecast:
+        return None
+    pool = min(forecast, key=lambda p: p["forecast"]["days_until_full"])
+    return {
+        "name": pool["name"],
+        "days": pool["forecast"]["days_until_full"],
+        "limiting": pool["forecast"]["limiting"],
     }
 
 
@@ -429,3 +458,282 @@ def format_duration(seconds):
     if seconds < 2 * 86400:
         return _("%(n)s h") % {"n": seconds // 3600}
     return _("%(n)s d") % {"n": seconds // 86400}
+
+
+# Capacity over time, services, backends, pools table, projects
+
+#: Ranges of the capacity chart: key -> (range, step), 84 to 168 points.
+#: 14 days needs a Prometheus retention of at least 14 days.
+RANGES = {
+    "24h": ("24h", "15m"),
+    "7d": ("7d", "1h"),
+    "14d": ("14d", "2h"),
+}
+DEFAULT_RANGE = "7d"
+#: Capacity chart views: the whole cloud, or the fullest pools.
+VIEW_CLOUD = "cloud"
+VIEW_POOLS = "pools"
+VIEWS = (VIEW_CLOUD, VIEW_POOLS)
+#: Pools drawn in the "fullest pools" view.
+CHART_POOLS = 5
+#: Cinder service history: (range, step) of the availability strip.
+HISTORY = ("24h", "15m")
+#: Rows of the pools, backends and projects tables.
+POOL_LIMIT = 10
+BACKEND_LIMIT = 10
+PROJECT_LIMIT = 10
+#: Pool name suggestions returned for the look-up box.
+SUGGESTION_LIMIT = 10
+#: Sort orders of the pools table.
+SORT_SOON = "soon"
+SORT_FULL = "full"
+SORT_STALE = "stale"
+SORTS = (SORT_SOON, SORT_FULL, SORT_STALE)
+
+VERDICT_SERVICE_DOWN = "service_down"
+
+
+def get_range(key):
+    """Return ``(key, range, step)``, falling back to the default range."""
+    if key not in RANGES:
+        key = DEFAULT_RANGE
+    window, step = RANGES[key]
+    return key, window, step
+
+
+def _seconds(duration):
+    units = {"m": 60, "h": 3600, "d": 86400}
+    return int(duration[:-1]) * units[duration[-1]]
+
+
+def grid(window, step, now):
+    """
+    Timestamps of a subquery ``expr[window:step]`` evaluated at ``now``.
+
+    Steps are aligned to multiples of the step, ending at the last step
+    boundary at or before ``now``.
+    """
+    step_s = _seconds(step)
+    count = _seconds(window) // step_s
+    end = int(now // step_s * step_s)
+    return [end - (count - 1 - i) * step_s for i in range(count)]
+
+
+def fill(points, timestamps):
+    """Values of ``[[ts, value], ...]`` on ``timestamps``; gaps are None."""
+    if len(timestamps) < 2:
+        return [None] * len(timestamps)
+    step = timestamps[1] - timestamps[0]
+    by_slot = {int(round(ts / step)) * step: value for ts, value in points}
+    return [by_slot.get(ts) for ts in timestamps]
+
+
+def service_rows(services, history, now):
+    """
+    Cinder services with their 24-hour availability strip.
+
+    Args:
+        services: ``get_volume_services()`` entries
+        history: ``get_volume_service_history()`` (resource -> points), or
+            None when it is not available
+        now: evaluation time of the history
+
+    Returns:
+        list: services, down first, each with ``strip`` (1 up, 0 down,
+        None no report, one per HISTORY step), ``up_percent`` (of the
+        steps with a report) and ``down_since`` (epoch of the first step
+        of the current outage, or None)
+    """
+    timestamps = grid(*HISTORY, now)
+    rows = []
+    for service in services:
+        strip = None
+        up_percent = None
+        down_since = None
+        if history is not None:
+            strip = [
+                None if v is None else (1 if v >= 1 else 0)
+                for v in fill(history.get(service["resource"], []), timestamps)
+            ]
+            reported = [v for v in strip if v is not None]
+            if reported:
+                up_percent = 100.0 * sum(reported) / len(reported)
+            if service["up"] is False:
+                for ts, value in zip(reversed(timestamps), reversed(strip)):
+                    if value == 1:
+                        break
+                    if value == 0:
+                        down_since = ts
+        rows.append(
+            dict(
+                service,
+                strip=strip,
+                up_percent=up_percent,
+                down_since=down_since,
+            )
+        )
+    order = {False: 0, None: 1, True: 2}
+    rows.sort(key=lambda r: (order[r["up"]], r["binary"], r["host"]))
+    return rows
+
+
+def services_down(services):
+    """Services that report "down", or stopped reporting."""
+    return [s for s in services if s["up"] is not True]
+
+
+def backend_rows(pools, services, limit=BACKEND_LIMIT):
+    """
+    Pools summed per backend (``host@backend``), most provisioned first.
+
+    Over-subscription is provisioned ÷ total. A backend whose
+    ``cinder-volume`` service is down (or silent) is flagged.
+
+    Returns:
+        tuple: (at most ``limit`` rows, number of backends)
+    """
+    down = {
+        s["host"]
+        for s in services_down(services)
+        if s["binary"] == "cinder-volume"
+    }
+    backends = {}
+    for pool in pools:
+        name = backend_of(pool["name"])
+        row = backends.setdefault(
+            name,
+            {
+                "name": name,
+                "pools": 0,
+                "stale": 0,
+                "total": 0.0,
+                "allocated": 0.0,
+                "provisioned": 0.0,
+            },
+        )
+        row["pools"] += 1
+        row["stale"] += 1 if pool["stale"] else 0
+        row["total"] += pool["total"]
+        row["allocated"] += pool["allocated"]
+        row["provisioned"] += pool["provisioned"]
+    rows = []
+    for row in backends.values():
+        ratio = row["provisioned"] / row["total"] if row["total"] else None
+        rows.append(
+            dict(
+                row,
+                oversubscription=ratio,
+                service_down=row["name"] in down,
+            )
+        )
+    rows.sort(key=lambda r: (not r["service_down"], -r["provisioned"]))
+    return rows[:limit], len(rows)
+
+
+def _fullness(row):
+    return max(
+        (
+            v
+            for v in (row["physical_percent"], row["virtual_percent"])
+            if v is not None
+        ),
+        default=0.0,
+    )
+
+
+def sort_pools(rows, by):
+    """Evaluated pools sorted for the pools table (see SORTS)."""
+    if by == SORT_FULL:
+        return sorted(rows, key=lambda r: (-_fullness(r), r["name"]))
+    if by == SORT_STALE:
+        return sorted(
+            rows,
+            key=lambda r: (
+                not r["stale"],
+                r["last_seen"] or 0 if r["stale"] else 0,
+                -_fullness(r),
+                r["name"],
+            ),
+        )
+
+    def soon(row):
+        forecast = row["forecast"] or {}
+        days = forecast.get("days_until_full")
+        return (days is None, days or 0, -_fullness(row), row["name"])
+
+    return sorted(rows, key=soon)
+
+
+def find_pool(rows, name):
+    """The pool named ``name`` (case-insensitive), or None."""
+    wanted = (name or "").strip().lower()
+    if not wanted:
+        return None
+    for row in rows:
+        if row["name"].lower() == wanted:
+            return row
+    return None
+
+
+def suggest_pools(pools, text, limit=SUGGESTION_LIMIT):
+    """Up to ``limit`` pool names containing ``text`` (case-insensitive)."""
+    text = (text or "").strip().lower()
+    names = sorted(p["name"] for p in pools)
+    if text:
+        names = [n for n in names if text in n.lower()]
+    return names[:limit]
+
+
+def fullest_pools(rows, limit=CHART_POOLS):
+    """Names of the pools with the highest physical use (reporting now)."""
+    fresh = [
+        r for r in rows if not r["stale"] and r["physical_percent"] is not None
+    ]
+    fresh.sort(key=lambda r: (-r["physical_percent"], r["name"]))
+    return [r["name"] for r in fresh[:limit]]
+
+
+def project_usage(volumes, snapshots, limit=PROJECT_LIMIT):
+    """
+    Volumes and snapshots per project, largest first.
+
+    Returns:
+        dict: ``rows`` (at most ``limit``: project_id, volumes, volume_gib,
+        snapshots, snapshot_gib, share percent of all volume and snapshot
+        GiB), ``total`` (projects) and ``gib`` (all projects)
+    """
+    projects = {}
+
+    def row(project_id):
+        return projects.setdefault(
+            project_id,
+            {
+                "project_id": project_id,
+                "volumes": 0,
+                "volume_gib": 0,
+                "snapshots": 0,
+                "snapshot_gib": 0,
+            },
+        )
+
+    for volume in volumes:
+        entry = row(volume.get("project_id"))
+        entry["volumes"] += 1
+        entry["volume_gib"] += volume.get("size") or 0
+    for snapshot in snapshots:
+        entry = row(snapshot.get("project_id"))
+        entry["snapshots"] += 1
+        entry["snapshot_gib"] += snapshot.get("size") or 0
+    gib = sum(p["volume_gib"] + p["snapshot_gib"] for p in projects.values())
+    rows = sorted(
+        projects.values(),
+        key=lambda p: (
+            -(p["volume_gib"] + p["snapshot_gib"]),
+            str(p["project_id"]),
+        ),
+    )[:limit]
+    for entry in rows:
+        entry["share"] = percent(
+            entry["volume_gib"] + entry["snapshot_gib"], gib
+        )
+    return {"rows": rows, "total": len(projects), "gib": gib}

@@ -1,0 +1,27 @@
+{% load i18n %}
+{% if error_message %}
+<div class="panel-body">{% include "admin/volume_metrics/_error.html" %}</div>
+{% elif not rows %}
+<div class="vm-empty"><i class="fa fa-heartbeat" aria-hidden="true"></i>{% trans "No Cinder service reported in the last 24 hours." %}</div>
+<div class="panel-footer vm-muted">{% include "admin/volume_metrics/_notes.html" %}</div>
+{% else %}
+<div class="table-responsive"><table class="table table-condensed vm-table">
+  <caption class="sr-only">{% trans "Cinder services, down first" %}</caption>
+  <thead><tr><th scope="col">{% trans "Service" %}</th><th scope="col">{% trans "Host / backend" %}</th><th scope="col">{% trans "Status" %}</th><th scope="col" style="width: 38%;">{% trans "Last 24 h" %}</th><th scope="col" class="text-right">{% trans "Up" %}</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr{% if row.up is False %} class="danger"{% elif row.up is None %} class="warning"{% endif %}>
+    <td>{{ row.binary }}</td>
+    <td>{{ row.host }}</td>
+    <td>{% if row.up %}<span class="label label-success"><i class="fa fa-check" aria-hidden="true"></i> {% trans "up" %}</span>{% elif row.up is False %}<span class="label label-danger"><i class="fa fa-times" aria-hidden="true"></i> {% if row.down_since %}{% trans "down since" %} <span class="vm-clock" data-ts="{{ row.down_since }}"></span>{% else %}{% trans "down" %}{% endif %}</span>{% else %}<span class="label label-warning"><i class="fa fa-eye-slash" aria-hidden="true"></i> {% trans "no report" %}</span>{% endif %}</td>
+    <td>{% if row.strip %}<div class="vm-strip" role="img" aria-label="{% if row.up_percent is not None %}{% blocktrans with p=row.up_percent|floatformat:0 %}Up {{ p }}% of the last 24 hours{% endblocktrans %}{% else %}{% trans "No report in the last 24 hours" %}{% endif %}">{% for v in row.strip %}<span class="{% if v == 1 %}vm-up{% elif v == 0 %}vm-down{% else %}vm-none{% endif %}"></span>{% endfor %}</div>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+    <td class="text-right">{% if row.up_percent is not None %}{{ row.up_percent|floatformat:0 }}%{% else %}–{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<div class="panel-footer vm-muted">
+  {% blocktrans count minutes=history_minutes %}Each mark is 15 minutes: green up, red down, grey no report. The history is refreshed every {{ minutes }} minute.{% plural %}Each mark is 15 minutes: green up, red down, grey no report. The history is refreshed every {{ minutes }} minutes.{% endblocktrans %}
+  {% include "admin/volume_metrics/_notes.html" %}
+</div>
+{% endif %}

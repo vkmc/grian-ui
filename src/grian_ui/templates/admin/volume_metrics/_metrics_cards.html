@@ -5,7 +5,15 @@
 <div class="col-sm-12">
 {% with v=summary.verdict names=summary.verdict.names|join:", " %}
 <div class="vm-verdict vm-verdict-{{ v.level }}">
-  {% if v.key == "pools_full" %}
+  {% if v.key == "service_down" %}
+  <h4><i class="fa fa-exclamation-circle text-danger" aria-hidden="true"></i>
+    {% blocktrans count n=v.count %}Cinder service down: {{ names }}{% plural %}{{ n }} Cinder services down: {{ names }}{% endblocktrans %}{% if v.count > v.names|length %} …{% endif %}</h4>
+  <div>{% trans "A service that reports down, or stopped reporting. Volume operations on its backend fail or get stuck, and its pools stop reporting." %}
+    {% if summary.pools_stale %}{% blocktrans count n=summary.pools_stale %}{{ n }} pool is stale (values frozen at its last report).{% plural %}{{ n }} pools are stale (values frozen at their last report).{% endblocktrans %}{% endif %}
+    {% if summary.attention.volumes_attention %}{% blocktrans count n=summary.attention.volumes_attention %}{{ n }} volume or snapshot is in an error or stuck state.{% plural %}{{ n }} volumes or snapshots are in an error or stuck state.{% endblocktrans %}{% endif %}
+    {% if summary.soonest %}{% if summary.soonest.limiting == "virtual" %}{% blocktrans with pool=summary.soonest.name days=summary.soonest.days|floatformat:0 %}Separately, {{ pool }} fills up in about {{ days }} days (virtual capacity).{% endblocktrans %}{% else %}{% blocktrans with pool=summary.soonest.name days=summary.soonest.days|floatformat:0 %}Separately, {{ pool }} fills up in about {{ days }} days (physical capacity).{% endblocktrans %}{% endif %}{% endif %}
+    <br><strong>{% trans "What to do:" %}</strong> {% trans "check the service (openstack volume service list) and its log, and restart it." %}</div>
+  {% elif v.key == "pools_full" %}
   <h4><i class="fa fa-exclamation-circle text-danger" aria-hidden="true"></i>
     {% blocktrans count n=v.count %}{{ n }} pool nearly full{% plural %}{{ n }} pools nearly full{% endblocktrans %}</h4>
   <div>{{ names }}{% if v.count > v.names|length %} …{% endif %}.
@@ -30,7 +38,7 @@
   <div>{% blocktrans with minutes=thresholds.stuck_minutes %}In a transitional state for more than {{ minutes }} minutes: usually a backend or service problem. See "Volumes and snapshots needing attention" below.{% endblocktrans %}</div>
   {% else %}
   <h4><i class="fa fa-check-circle text-success" aria-hidden="true"></i> {% trans "Storage is healthy" %}</h4>
-  <div>{% blocktrans with physical=thresholds.physical_warning virtual=thresholds.virtual_warning count n=summary.pools_total %}{{ n }} pool below {{ physical }}% physical and {{ virtual }}% virtual use{% plural %}{{ n }} pools below {{ physical }}% physical and {{ virtual }}% virtual use{% endblocktrans %}{% if summary.attention %}, {% trans "no volume or snapshot in an error or stuck state." %}{% else %}. {% trans "Volumes and snapshots are not checked: the Block Storage API data is not available." %}{% endif %}
+  <div>{% if summary.services_total %}{% blocktrans count n=summary.services_total %}{{ n }} Cinder service up, {% plural %}All {{ n }} Cinder services up, {% endblocktrans %}{% endif %}{% blocktrans with physical=thresholds.physical_warning virtual=thresholds.virtual_warning count n=summary.pools_total %}{{ n }} pool below {{ physical }}% physical and {{ virtual }}% virtual use{% plural %}{{ n }} pools below {{ physical }}% physical and {{ virtual }}% virtual use{% endblocktrans %}{% if summary.attention %}, {% trans "no volume or snapshot in an error or stuck state." %}{% else %}. {% trans "Volumes and snapshots are not checked: the Block Storage API data is not available." %}{% endif %}
     {% if summary.forecast_history_days is not None %}<br><i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with days=summary.forecast_history_days %}Forecasts need 7 days of history; the pools have {{ days }} days.{% endblocktrans %}{% endif %}</div>
   {% endif %}
 </div>

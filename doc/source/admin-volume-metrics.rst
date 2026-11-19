@@ -43,6 +43,10 @@ One sentence at the top sums the page up, the first that applies:
    * - Verdict
      - Level
      - Rule
+   * - Cinder service down
+     - critical
+     - A Cinder service reports down, or stopped reporting (see
+       `Cinder services`_).
    * - *N* pools nearly full
      - critical
      - A pool reporting now is critical: physical or virtual use at the
@@ -88,10 +92,10 @@ how many clean-up candidates there are.
      - PromQL
    * - Total Storage (GiB)
      - ``volume.provider.pool.capacity.total``
-     - Sum of the pools (see `Storage Pools`_)
+     - Sum of the pools (see `Pools`_)
    * - Allocated Storage (GiB)
      - ``volume.provider.pool.capacity.allocated``
-     - Sum of the pools (see `Storage Pools`_)
+     - Sum of the pools (see `Pools`_)
    * - Total Volumes
      - ``volume.size``
      - ``count(last_over_time(ceilometer_volume_size[10m]))``
@@ -158,7 +162,8 @@ dashboards (Instance Health reads the Compute API the same way):
        request per ``osapi_max_limit`` items, 1000 by default)
      - once per region every **2 minutes**
      - a bounded summary: up to 500 attention rows, worst first, with
-       exact counts (25 rows shown), three names
+       exact counts (25 rows shown), three names and the top 10
+       projects (see `Usage by project`_)
    * - ``GET /v3/projects`` (Identity API, project names)
      - every **5 minutes**
      - project ID to name
@@ -170,11 +175,59 @@ lifetime plus 30 seconds is flagged as possibly out of date. When the
 Block Storage API fails, the verdict and cards
 are built from the metrics alone and say that volumes were not checked.
 
-Storage Pools
--------------
+Capacity over time
+------------------
 
-A per-pool breakdown with capacity bars and a detailed table. Rendered on
-page load.
+A chart of the last 24 hours, 7 days (default) or 14 days, chosen with the
+range buttons at the top of the page:
+
+- **Whole cloud**: allocated, provisioned and total capacity, one subquery:
+  ``(label_replace(sum(max by (resource) (last_over_time(..._allocated[10m]))),
+  "field", "allocated", "", "") or ...)[7d:1h]``. Provisioned above total is
+  normal with thin provisioning.
+- **Fullest pools**: physical use (allocated ÷ total) of the 5 pools with
+  the highest physical use now (pools reporting now), with the warning and
+  critical thresholds; one subquery on those pools
+  (``resource=~"<pool>|<pool>"``).
+
+Steps: 15 minutes (24h), 1 hour (7d), 2 hours (14d), so at most 168 points
+per series; 14 days needs a Prometheus retention of at least 14 days. Each
+range and view is computed at most once per 60 s (24h), 5 minutes (7d) or
+10 minutes (14d).
+
+
+Pools
+-----
+
+One table, **top 10** pools, replacing the former Storage Pools, Capacity
+Forecast and Detailed Pool Information panels. Sort it by *Soonest full*
+(forecast), *Fullest* (the higher of physical and virtual use) or *Stale
+first*; the look-up box under it shows any pool by name (case-insensitive,
+with suggestions: at most 10 names per keystroke).
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Column
+     - Meaning
+   * - Physical: allocated ÷ total
+     - Space really used.
+   * - Virtual: provisioned ÷ limit
+     - What thin provisioning promised, against the over-subscription limit
+       (limit = provisioned + virtual free = total ×
+       ``max_over_subscription_ratio``). "not reported" when the pool does
+       not report its virtual free capacity.
+   * - Free (GiB)
+     - Free capacity reported by the backend.
+   * - Forecast
+     - When free *or* virtual free capacity reaches zero at the 7-day trend,
+       whichever comes first, and which one; "Insufficient data (N of 7
+       days)" before 7 days of history, "Not growing" when neither shrinks.
+   * - Last report
+     - Time since the pool last reported.
+   * - Status
+     - Critical, Warning or Healthy (see `Configuration`_), or **Stale**.
 
 Every pool comes from one query per metric, whatever the number of pools
 (six queries in all). The ``resource`` label holds the Cinder pool name;
@@ -208,19 +261,11 @@ sg-core replicas).
      - ``max by (resource) (max_over_time(timestamp(...total)[15m:30s]))``,
        or for pools silent for longer the same over ``[24h:5m]``
 
-Each pool is displayed with:
-
-- A **capacity bar** showing the percentage of allocated vs. total capacity.
-- A **detail row** with free and provisioned values.
-- A **collapsible table** with all numeric values, the virtual free
-  capacity, the time of the last report and a color-coded usage percentage
-  label (by default green below 75%, orange from 75%, red from 90%; see
-  `Configuration`_).
-
 **Stale pools.** A pool that has not reported for 10 minutes (the
 staleness window, see `Configuration`_), usually because its
 ``cinder-volume`` service is down, is marked **Stale**: its values are
-frozen at its last report, shown with the time of that report. Pools
+frozen at its last report, it is not forecast, and its status is at
+least a warning. Pools
 silent for more than 24 hours are no longer listed. The staleness window
 must be at least twice the Ceilometer polling interval (300 seconds by
 default).
@@ -228,15 +273,7 @@ default).
 All values are in GiB, matching the units reported by Cinder's volume
 backend statistics.
 
-
-Capacity Forecast
------------------
-
-A prediction table that forecasts when each storage pool will run out of
-space. It refreshes every **60 seconds**; the forecasts themselves are
-recomputed every 5 minutes.
-
-A pool runs out when either of two capacities reaches zero:
+**Forecast.** A pool runs out when either of two capacities reaches zero:
 
 - **free** capacity, the physical space left. It only shrinks when data is
   written, so on thin-provisioned pools it can stay equal to the total
@@ -278,32 +315,82 @@ reaches zero using linear interpolation::
     decline_per_day = (current - predicted_value) / 30
     days_until_full = current / decline_per_day
 
-Status labels (with the default thresholds):
-
-- **Full in N days** (red within 14 days, orange within 30 days): a
-  capacity reaches zero.
-- **Declining: full in N days** (grey): a capacity is decreasing but will
-  not reach zero within 30 days.
-- **Healthy** (green): both capacities are stable or increasing.
-- **Insufficient data (N of 7 days)** (grey): the pool has less than 7
-  days of history.
-
-Only pools that reported within the staleness window are forecast: the values
-of stale pools are frozen.
+Only pools that reported within the staleness window are forecast. The
+forecasts are recomputed every 5 minutes.
 
 .. note::
 
    Predictions require at least 7 days of continuous Ceilometer data
-   collection. On a fresh deployment, this panel will show "Insufficient
-   data" until enough history accumulates.
+   collection. On a fresh deployment, the pools show "Insufficient data"
+   until enough history accumulates.
+
+
+Cinder services
+---------------
+
+Each ``cinder-scheduler``, ``cinder-volume`` (per backend) and, when
+deployed, ``cinder-backup`` service, down first, from
+``ceilometer_volume_service_health`` (1 up, 0 down; the only
+service-status metric Ceilometer provides):
+
+- status: ``max by (resource) (last_over_time(...[10m]))``; a service that
+  reported in the last 24 hours but not within the staleness window shows *no
+  report* and counts as down in the verdict;
+- a 24-hour strip, one mark per 15 minutes (the lowest value of each
+  period: one "down" report makes it red; grey is no report), with the
+  share of periods up:
+  ``min by (resource) (min_over_time(...[15m]))[24h:15m]``,
+  recomputed every 5 minutes. "Down since" is the start of the current run
+  of red marks.
+
+A service down makes the verdict critical: "Cinder service down:
+cinder-volume on *host@backend*", with its stale pools, the volumes in an
+error or stuck state, and the pool forecast to be full first.
+
+
+Backends
+--------
+
+The pools summed per backend (``host@backend``, the pool name up to
+``#``), with the over-subscription ratio (provisioned ÷ total). A backend
+whose ``cinder-volume`` service is down is flagged and listed first. At most
+10 backends. The per-backend ``volume.provider.capacity.*`` meters are
+notification-based and can be hours old, so the polled pool metrics are
+used instead.
+
+
+Usage by project
+----------------
+
+The **top 10** projects by volume and snapshot GiB, from the same Block
+Storage API listing as the attention list (no extra call), with their share
+of all volume and snapshot GiB. A project name opens **Admin > Volume >
+Volumes** filtered by that project (the page's server-side filter, sent as
+a form). Names come from the Identity API; without them, project IDs are
+shown without a link.
+
+
+Images and backups
+------------------
+
+One query, every 5 minutes: the number of images, their projects and the
+image store size (``ceilometer_image_size`` over the last hour), the number
+of distinct images downloaded in 24 hours (``ceilometer_image_download``,
+a notification meter), and volume backups (``ceilometer_volume_backup_size``:
+count and GiB). Without a ``cinder-backup`` service in the service list, the
+backups line says the backup service is not deployed; when the service list
+cannot be loaded, it says "unknown", with a note.
 
 
 Refresh, caching and errors
 ---------------------------
 
-The pool metrics and the volume and snapshot counts (eight queries) are
-read at most once per refresh interval, the forecasts (five queries) at
-most every 5 minutes. Each result is computed once and shared through the
+The pool metrics, the volume and snapshot counts and the Cinder service
+status (nine queries) are read at most once per refresh interval (60 s),
+the forecasts (five queries), the service history (one) and the image and
+backup totals (one) at most every 5 minutes, and each capacity chart (one)
+as described above. The number of queries does not depend on the number of
+pools, services or volumes. Each result is computed once and shared through the
 Horizon cache by the page sections and by every administrator of the
 region (this needs a cache shared by the Horizon processes, such as
 memcached, the Horizon default).

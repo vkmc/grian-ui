@@ -8,6 +8,7 @@ Provides realistic sample telemetry data.
 
 import time
 
+from grian_ui.datasource import fake_storage
 from grian_ui.datasource.api import DatasourceClient
 
 
@@ -40,7 +41,7 @@ class FakeTelemetryClient(DatasourceClient):
         now = time.time()
         return [
             {
-                "name": "storage-pool-01",
+                "name": "ctl-01@lvm#storage-pool-01",
                 "total": 5120.0,
                 "allocated": 4096.0,
                 "free": 1024.0,
@@ -50,7 +51,7 @@ class FakeTelemetryClient(DatasourceClient):
                 "stale": False,
             },
             {
-                "name": "storage-pool-02",
+                "name": "ctl-01@lvm#storage-pool-02",
                 "total": 5120.0,
                 "allocated": 2048.0,
                 "free": 3072.0,
@@ -60,7 +61,7 @@ class FakeTelemetryClient(DatasourceClient):
                 "stale": False,
             },
             {
-                "name": "storage-pool-03",
+                "name": "ctl-02@nfs#storage-pool-03",
                 "total": 2048.0,
                 "allocated": 512.0,
                 "free": 1536.0,
@@ -80,7 +81,7 @@ class FakeTelemetryClient(DatasourceClient):
         """
         return [
             {
-                "name": "storage-pool-01",
+                "name": "ctl-01@lvm#storage-pool-01",
                 "current_free": 1024.0,
                 "current_virtual_free": None,
                 "days_physical": 51.2,
@@ -92,7 +93,7 @@ class FakeTelemetryClient(DatasourceClient):
                 "enough_history": True,
             },
             {
-                "name": "storage-pool-02",
+                "name": "ctl-01@lvm#storage-pool-02",
                 "current_free": 3072.0,
                 "current_virtual_free": 2048.0,
                 "days_physical": None,
@@ -104,6 +105,26 @@ class FakeTelemetryClient(DatasourceClient):
                 "enough_history": True,
             },
         ]
+
+    # Storage Health (sample data in grian_ui.datasource.fake_storage)
+
+    def get_volume_services(self) -> list:
+        """Get sample Cinder service states (see fake_storage)."""
+        return fake_storage.fake_services()
+
+    def get_volume_service_history(self, at: float = None) -> dict:
+        """Get a sample 24-hour Cinder service history."""
+        return fake_storage.fake_service_history(at)
+
+    def get_storage_capacity_trend(
+        self, range_key: str, pools: list = None, at: float = None
+    ) -> dict:
+        """Get a sample capacity trend."""
+        return fake_storage.fake_capacity_trend(range_key, pools, at)
+
+    def get_storage_images(self) -> dict:
+        """Get sample image and backup totals."""
+        return fake_storage.fake_images()
 
 
 def get_client(request=None) -> DatasourceClient:
