@@ -1,0 +1,26 @@
+---
+fixes:
+  - |
+    The Volume Metrics capacity forecast now also warns on thin-provisioned
+    pools. It forecasts both free capacity and virtual free capacity
+    (Cinder's over-subscription limit), which on thin pools usually runs out
+    first while free capacity stays equal to the total, and reports
+    whichever reaches zero first, with its limiting factor. Pools with less
+    than 7 days of history say so.
+  - |
+    The Volume Metrics panel no longer runs three queries per storage pool:
+    each metric is read with one query for all pools, shared through the
+    Horizon cache by the page sections and the administrators of a region,
+    and refreshed every 60 seconds instead of every 10.
+  - |
+    The Volume Metrics panel no longer shows raw exception text or empty
+    values when the metrics cannot be loaded: it shows a plain message, or
+    the last good data with the time it was fetched. Details go to the
+    Horizon log.
+  - |
+    Storage pools that have not reported for 10 minutes, usually because
+    their ``cinder-volume`` service is down, are now marked as stale in the
+    Volume Metrics panel, with the time of their last report, instead of
+    disappearing or showing frozen values without notice. The window can be
+    changed with ``GRIAN_PLUGIN['storage_stale_minutes']`` (1 to 360
+    minutes, default 10).

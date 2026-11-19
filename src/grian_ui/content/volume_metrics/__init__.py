@@ -1,3 +1,3 @@
 """
-Volume metrics panel for Grian UI.
+Storage Health panel for Grian UI (URL slug volume_metrics).
 """

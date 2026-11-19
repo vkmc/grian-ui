@@ -310,6 +310,97 @@ def get_openstack_endpoint_type():
     return getattr(settings, "OPENSTACK_ENDPOINT_TYPE", "publicURL")
 
 
+#: Default storage staleness window (Storage Health, the Volume Metrics
+#: panel), minutes, and its largest accepted value.
+DEFAULT_STORAGE_STALE_MINUTES = 10
+MAX_STORAGE_STALE_MINUTES = 360
+
+
+def get_storage_stale_minutes():
+    """
+    Get the storage staleness window, in minutes.
+
+    A storage pool (or Cinder service) without a report for longer is
+    stale, and only reports within this window count as current. Override
+    with ``GRIAN_PLUGIN['storage_stale_minutes']``: a whole number from 1
+    to MAX_STORAGE_STALE_MINUTES, at least twice the Ceilometer polling
+    interval.
+
+    Raises:
+        ConfigurationError: If the value is not a valid number of minutes
+    """
+    value = _get_grian_plugin_config().get(
+        "storage_stale_minutes", DEFAULT_STORAGE_STALE_MINUTES
+    )
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= MAX_STORAGE_STALE_MINUTES
+    ):
+        raise ConfigurationError(
+            "GRIAN_PLUGIN['storage_stale_minutes'] must be a whole number "
+            f"of minutes from 1 to {MAX_STORAGE_STALE_MINUTES}, got {value!r}"
+        )
+    return value
+
+
+#: Default storage health thresholds (Storage Health, the Volume Metrics
+#: panel).
+DEFAULT_STORAGE_THRESHOLDS = {
+    # physical use of a pool (allocated / total), percent
+    "physical_warning": 75,
+    "physical_critical": 90,
+    # virtual use of a pool (provisioned / over-subscription limit), percent
+    "virtual_warning": 75,
+    "virtual_critical": 90,
+    # a pool forecast to be full within this many days (lower is worse)
+    "forecast_warning_days": 30,
+    "forecast_critical_days": 14,
+    # a volume or snapshot in a transitional state (creating, attaching,
+    # detaching, deleting) for longer is stuck, minutes
+    "stuck_minutes": 30,
+    # clean-up candidates: volumes unattached for this many days, and
+    # snapshots this old with a newer snapshot of the same volume
+    "unattached_days": 30,
+    "old_snapshot_days": 90,
+}
+
+
+def get_storage_thresholds():
+    """
+    Get the storage health thresholds.
+
+    Defaults (DEFAULT_STORAGE_THRESHOLDS) can be overridden per key with
+    ``GRIAN_PLUGIN['storage_thresholds']``. See get_thresholds().
+
+    Raises:
+        ConfigurationError: If an override is unknown or out of range
+    """
+    thresholds = get_thresholds(
+        "storage_thresholds", DEFAULT_STORAGE_THRESHOLDS
+    )
+    for key in (
+        "physical_warning",
+        "physical_critical",
+        "virtual_warning",
+        "virtual_critical",
+    ):
+        if thresholds[key] > 100:
+            raise ConfigurationError(
+                f"GRIAN_PLUGIN['storage_thresholds']['{key}'] must be a "
+                f"percentage up to 100, got {thresholds[key]!r}"
+            )
+    if (
+        thresholds["forecast_critical_days"]
+        > thresholds["forecast_warning_days"]
+    ):
+        raise ConfigurationError(
+            "GRIAN_PLUGIN['storage_thresholds']['forecast_critical_days'] "
+            "must not be greater than 'forecast_warning_days'"
+        )
+    return thresholds
+
+
 #: Default network health thresholds.
 DEFAULT_NETWORK_HEALTH_THRESHOLDS = {
     # an interface behind a router is quiet when its inbound packet rate

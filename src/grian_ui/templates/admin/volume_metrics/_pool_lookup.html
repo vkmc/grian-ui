@@ -1,0 +1,13 @@
+{% load i18n %}
+{% if error_message %}
+{% include "admin/volume_metrics/_error.html" with margin="10px 0 0" %}
+{% elif not name %}
+{% elif row %}
+<div class="table-responsive"><table class="table table-condensed vm-table" style="margin-top: 10px;">
+  <caption class="sr-only">{% blocktrans %}Pool {{ name }}{% endblocktrans %}</caption>
+  {% include "admin/volume_metrics/_pool_head.html" %}
+  <tbody>{% include "admin/volume_metrics/_pool_row.html" %}</tbody>
+</table></div>
+{% else %}
+<p class="text-muted" style="margin: 8px 0 0;">{% blocktrans %}No pool named "{{ name }}" reported in the last 24 hours.{% endblocktrans %}</p>
+{% endif %}

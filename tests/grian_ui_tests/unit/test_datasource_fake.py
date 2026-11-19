@@ -25,34 +25,6 @@ class FakeTelemetryClientTests(base.TestCase):
         super().setUp()
         self.client = fake.FakeTelemetryClient()
 
-    def test_get_telemetry_overview_returns_dict(self):
-        result = self.client.get_telemetry_overview()
-        self.assertIsInstance(result, dict)
-
-    def test_get_telemetry_overview_keys(self):
-        result = self.client.get_telemetry_overview()
-        expected_keys = {
-            "total_metrics",
-            "active_instances",
-            "alerts_count",
-            "cpu_usage_avg",
-            "memory_usage_avg",
-            "network_throughput",
-            "disk_io_rate",
-            "uptime_percentage",
-            "total_storage",
-            "allocated_storage",
-            "last_updated",
-        }
-        self.assertEqual(set(result.keys()), expected_keys)
-
-    def test_get_telemetry_overview_static_values(self):
-        result = self.client.get_telemetry_overview()
-        self.assertEqual(result["total_metrics"], 1247)
-        self.assertEqual(result["active_instances"], 18)
-        self.assertEqual(result["alerts_count"], 3)
-        self.assertEqual(result["total_storage"], 10240)
-
     def test_get_volumes_count(self):
         self.assertEqual(self.client.get_volumes_count(), 120)
 
@@ -62,22 +34,31 @@ class FakeTelemetryClientTests(base.TestCase):
     def test_get_storage_pools_returns_list(self):
         result = self.client.get_storage_pools()
         self.assertIsInstance(result, list)
-        self.assertEqual(len(result), 2)
+        self.assertEqual(len(result), 3)
 
     def test_get_storage_pools_structure(self):
         pools = self.client.get_storage_pools()
         for pool in pools:
-            self.assertIn("name", pool)
-            self.assertIn("total", pool)
-            self.assertIn("allocated", pool)
-            self.assertIn("free", pool)
-            self.assertIn("provisioned", pool)
+            self.assertEqual(
+                set(pool),
+                {
+                    "name",
+                    "total",
+                    "allocated",
+                    "free",
+                    "provisioned",
+                    "virtual_free",
+                    "last_seen",
+                    "stale",
+                },
+            )
 
     def test_get_storage_pools_values(self):
         pools = self.client.get_storage_pools()
-        self.assertEqual(pools[0]["name"], "storage-pool-01")
-        self.assertEqual(pools[1]["name"], "storage-pool-02")
+        self.assertEqual(pools[0]["name"], "ctl-01@lvm#storage-pool-01")
+        self.assertEqual(pools[1]["name"], "ctl-01@lvm#storage-pool-02")
         self.assertEqual(pools[0]["total"], 5120.0)
+        self.assertEqual([p["stale"] for p in pools], [False, False, True])
 
     def test_get_capacity_predictions_returns_list(self):
         result = self.client.get_capacity_predictions()
@@ -87,18 +68,26 @@ class FakeTelemetryClientTests(base.TestCase):
     def test_get_capacity_predictions_structure(self):
         predictions = self.client.get_capacity_predictions()
         for pred in predictions:
-            self.assertIn("name", pred)
-            self.assertIn("current_free", pred)
-            self.assertIn("predicted_value", pred)
-            self.assertIn("days_until_full", pred)
-            self.assertIn("will_run_out", pred)
+            for key in (
+                "name",
+                "current_free",
+                "current_virtual_free",
+                "days_physical",
+                "days_virtual",
+                "days_until_full",
+                "limiting",
+                "will_run_out",
+                "history_days",
+                "enough_history",
+            ):
+                self.assertIn(key, pred)
 
     def test_get_capacity_predictions_values(self):
         predictions = self.client.get_capacity_predictions()
-        self.assertFalse(predictions[0]["will_run_out"])
-        self.assertIsNone(predictions[0]["days_until_full"])
+        self.assertEqual(predictions[0]["limiting"], "physical")
         self.assertTrue(predictions[1]["will_run_out"])
         self.assertEqual(predictions[1]["days_until_full"], 24.5)
+        self.assertEqual(predictions[1]["limiting"], "virtual")
 
 
 class FakeComputeHostTests(base.TestCase):

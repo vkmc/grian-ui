@@ -9,6 +9,7 @@ Provides access to Prometheus metrics through OpenStack observability service.
 import logging
 import math
 import re
+import time
 
 from keystoneauth1 import session
 from keystoneauth1.identity import v3
@@ -20,12 +21,12 @@ from grian_ui import instance_health
 from grian_ui import inventory
 from grian_ui import timeseries
 from grian_ui.datasource import prometheus_network
+from grian_ui.datasource import prometheus_storage
 from grian_ui.datasource.api import DatasourceClient
 
 
 LOG = logging.getLogger(__name__)
 
-STALENESS_WINDOW = "10m"
 #: Timeout of the requests to Aetos, in seconds (per connection attempt and
 #: per read, as for every keystoneauth session), so a hung backend fails the
 #: query instead of holding a Horizon worker thread indefinitely. A
@@ -33,6 +34,20 @@ STALENESS_WINDOW = "10m"
 #: grian_ui.cache.MAX_COMPUTE_SECONDS; another request then takes the lock
 #: over.
 QUERY_TIMEOUT = 30
+
+#: Storage pool capacity metrics, one per field.
+POOL_METRIC_PREFIX = "ceilometer_volume_provider_pool_capacity_"
+POOL_FIELDS = ("total", "allocated", "free", "provisioned", "virtual_free")
+#: Pools that reported within this window are listed; those silent for
+#: longer than GRIAN_PLUGIN['storage_stale_minutes'] (see
+#: config.get_storage_stale_minutes) are marked stale, with their last
+#: values.
+POOL_LOOKBACK = "24h"
+#: Capacity forecasts: linear trend over FORECAST_HISTORY, which a pool
+#: must cover (with one hour of tolerance) to get a forecast.
+FORECAST_HISTORY = "7d"
+FORECAST_HORIZON_DAYS = 30
+FORECAST_MIN_HISTORY_SECONDS = 7 * 86400 - 3600
 
 # Compute host CPU metrics (Nova compute monitors -> Ceilometer).
 COMPUTE_CPU_METRIC = "ceilometer_compute_node_cpu_percent"
@@ -103,6 +118,58 @@ def number(value, ndigits=None):
     if math.isnan(result) or math.isinf(result):
         return None
     return result if ndigits is None else round(result, ndigits)
+
+
+def stale_window():
+    """The storage staleness window as a PromQL duration, e.g. ``"10m"``."""
+    return f"{config.get_storage_stale_minutes()}m"
+
+
+def pool_last_seen_query():
+    """
+    Time of each pool's last report (epoch), within POOL_LOOKBACK.
+
+    ``timestamp()`` inside a subquery gives the time of the sample each
+    step sees; the latest one is the last report. The fine-grained part
+    covers recent reports (up to 30 s late) and the staleness window, the
+    coarse one, evaluated when the first returns nothing, pools silent for
+    longer.
+    """
+    metric = f"{POOL_METRIC_PREFIX}total"
+    recent = max(15, config.get_storage_stale_minutes() + 5)
+    return (
+        f"max by (resource) (max_over_time(timestamp({metric})"
+        f"[{recent}m:30s]))"
+        f" or max by (resource) (max_over_time(timestamp({metric})"
+        f"[{POOL_LOOKBACK}:5m]))"
+    )
+
+
+def pool_history_query():
+    """Seconds since each pool's first report, within FORECAST_HISTORY."""
+    metric = f"{POOL_METRIC_PREFIX}total"
+    return (
+        f"max by (resource) (time() - min_over_time(timestamp({metric})"
+        f"[{FORECAST_HISTORY}:1h]))"
+    )
+
+
+def days_until_zero(current, predicted):
+    """
+    Days until a capacity reaches zero at its trend, or None.
+
+    ``predicted`` is the value FORECAST_HORIZON_DAYS ahead. None when the
+    capacity is not shrinking or a value is missing; 0 when it is already
+    used up.
+    """
+    if current is None or predicted is None:
+        return None
+    decline_per_day = (current - predicted) / FORECAST_HORIZON_DAYS
+    if decline_per_day <= 0:
+        return None
+    if current <= 0:
+        return 0.0
+    return round(current / decline_per_day, 1)
 
 
 # Instance metrics (Ceilometer compute agent, cumulative counters).
@@ -273,65 +340,6 @@ class PrometheusTelemetryClient(DatasourceClient):
             sess, adapter_options=adapter_options
         )
 
-    def get_telemetry_overview(self) -> dict:
-        """
-        Get telemetry overview data.
-
-        Aggregates multiple Prometheus queries to build a dashboard overview.
-        Returns computed metrics rather than raw metric list.
-        """
-        overview = {}
-
-        try:
-            # Query for vCPUs count
-            cpu_result = self.client.query(query="sum(ceilometer_vcpus)")
-            if cpu_result and len(cpu_result) > 0:
-                overview["cpu_usage_avg"] = round(
-                    float(cpu_result[0].value), 1
-                )
-            else:
-                overview["cpu_usage_avg"] = 0.0
-
-            # Query for memory usage in MB
-            memory_result = self.client.query(
-                query="sum(ceilometer_memory_usage)"
-            )
-            if memory_result and len(memory_result) > 0:
-                # Convert MB to GB for display
-                overview["memory_usage_avg"] = round(
-                    float(memory_result[0].value) / 1024, 1
-                )
-            else:
-                overview["memory_usage_avg"] = 0.0
-
-            # Query for total storage capacity
-            total_storage_result = self.client.query(
-                query="sum(ceilometer_volume_provider_pool_capacity_total)"
-            )
-            if total_storage_result and len(total_storage_result) > 0:
-                overview["total_storage"] = int(
-                    float(total_storage_result[0].value)
-                )
-            else:
-                overview["total_storage"] = 0
-
-            # Query for allocated storage
-            allocated_storage_result = self.client.query(
-                query="sum(ceilometer_volume_provider_pool_capacity_allocated)"
-            )
-            if allocated_storage_result and len(allocated_storage_result) > 0:
-                overview["allocated_storage"] = int(
-                    float(allocated_storage_result[0].value)
-                )
-            else:
-                overview["allocated_storage"] = 0
-
-        except Exception as e:
-            # Return partial data if some queries fail
-            overview["error"] = str(e)
-
-        return overview
-
     def get_volumes_count(self) -> int:
         """
         Get telemetry volumes count.
@@ -340,7 +348,7 @@ class PrometheusTelemetryClient(DatasourceClient):
             int: Current count of volumes from Ceilometer metrics
         """
         result = self.client.query(
-            query=f"count(last_over_time(ceilometer_volume_size[{STALENESS_WINDOW}]))"
+            query=f"count(last_over_time(ceilometer_volume_size[{stale_window()}]))"
         )
         if result and len(result) > 0:
             return int(float(result[0].value))
@@ -354,7 +362,7 @@ class PrometheusTelemetryClient(DatasourceClient):
             int: Current count of snapshots from Ceilometer metrics
         """
         result = self.client.query(
-            query=f"count(last_over_time(ceilometer_volume_snapshot_size[{STALENESS_WINDOW}]))"
+            query=f"count(last_over_time(ceilometer_volume_snapshot_size[{stale_window()}]))"
         )
         if result and len(result) > 0:
             return int(float(result[0].value))
@@ -362,136 +370,154 @@ class PrometheusTelemetryClient(DatasourceClient):
 
     def get_storage_pools(self) -> list:
         """
-        Get storage pools information from Ceilometer metrics.
+        Get every storage pool's capacity from Ceilometer metrics.
+
+        One query per metric for all pools, whatever their number, plus
+        one for the time of each pool's last report. Pools that reported
+        in the last POOL_LOOKBACK are returned, those silent for more than
+        the staleness window (config.get_storage_stale_minutes) with
+        ``stale`` set: their values are frozen at
+        their last report.
 
         Returns:
-            list: List of storage pool dictionaries with capacity metrics
+            list: one dict per pool: ``name``, ``total``, ``allocated``,
+            ``free``, ``provisioned``, ``virtual_free`` (GiB; None when the
+            pool does not report it), ``last_seen`` (epoch) and ``stale``.
+            Errors are raised to the caller.
         """
-        pools = []
-
-        try:
-            # Get all unique pool resources
-            # We'll use the total capacity metric to identify pools
-            total_result = self.client.query(
-                query="ceilometer_volume_provider_pool_capacity_total"
+        values = {}
+        for field in POOL_FIELDS:
+            query = (
+                f"max by (resource) (last_over_time("
+                f"{POOL_METRIC_PREFIX}{field}[{POOL_LOOKBACK}]))"
             )
+            for metric in self.client.query(query=query) or []:
+                name = metric.labels.get("resource")
+                if name:
+                    values.setdefault(name, {})[field] = number(metric.value)
 
-            if not total_result:
-                return pools
+        last_seen = {}
+        for metric in self.client.query(query=pool_last_seen_query()) or []:
+            name = metric.labels.get("resource")
+            if name:
+                last_seen[name] = number(metric.value)
 
-            # For each pool, gather all metrics
-            for pool_metric in total_result:
-                pool_name = pool_metric.labels.get("resource", "unknown")
-
-                pool_data = {
-                    "name": pool_name,
-                    "total": float(pool_metric.value),
-                    "allocated": 0.0,
-                    "free": 0.0,
-                    "provisioned": 0.0,
-                }
-
-                # Get allocated capacity for this pool
-                allocated_query = f'ceilometer_volume_provider_pool_capacity_allocated{{resource="{pool_name}"}}'
-                allocated_result = self.client.query(query=allocated_query)
-                if allocated_result and len(allocated_result) > 0:
-                    pool_data["allocated"] = float(allocated_result[0].value)
-
-                # Get free capacity for this pool
-                free_query = f'ceilometer_volume_provider_pool_capacity_free{{resource="{pool_name}"}}'
-                free_result = self.client.query(query=free_query)
-                if free_result and len(free_result) > 0:
-                    pool_data["free"] = float(free_result[0].value)
-
-                # Get provisioned capacity for this pool
-                provisioned_query = f'ceilometer_volume_provider_pool_capacity_provisioned{{resource="{pool_name}"}}'
-                provisioned_result = self.client.query(query=provisioned_query)
-                if provisioned_result and len(provisioned_result) > 0:
-                    pool_data["provisioned"] = float(
-                        provisioned_result[0].value
-                    )
-
-                pools.append(pool_data)
-
-        except Exception:
-            # Return empty list on error
-            return []
-
+        now = time.time()
+        stale_seconds = config.get_storage_stale_minutes() * 60
+        pools = []
+        for name in sorted(values):
+            fields = values[name]
+            if fields.get("total") is None:
+                continue
+            seen = last_seen.get(name)
+            pool = {
+                "name": name,
+                "total": fields["total"],
+                "allocated": fields.get("allocated") or 0.0,
+                "free": fields.get("free") or 0.0,
+                "provisioned": fields.get("provisioned") or 0.0,
+                "virtual_free": fields.get("virtual_free"),
+                "last_seen": seen,
+                "stale": seen is None or now - seen > stale_seconds,
+            }
+            pools.append(pool)
         return pools
 
     def get_capacity_predictions(self) -> list:
         """
-        Predict when storage pools will run out of space.
+        Predict when storage pools run out of space.
 
-        Uses predict_linear to forecast when free capacity will hit zero
-        based on the last 7 days of data, looking 30 days into the future.
+        Thin pools usually run out of *virtual* capacity (Cinder's
+        over-subscription limit) long before free space drops: free only
+        shrinks when data is written. Both free and virtual free are
+        therefore forecast with ``predict_linear`` over the last 7 days,
+        and the one that reaches zero first is reported. One query per
+        metric for all pools, plus one for the length of their history.
 
         Returns:
-            list: List of predictions per pool with:
+            list: one dict per pool reporting now:
+
                 - name: pool name
-                - days_until_full: predicted days until capacity hits zero (None if not predicted to fill)
-                - predicted_value: the predicted free capacity in 30 days
-                - current_free: current free capacity
+                - current_free, current_virtual_free: GiB (None if not
+                  reported)
+                - days_physical, days_virtual: days until each reaches
+                  zero at the 7-day trend, or None if it is not shrinking
+                - days_until_full: the smaller of the two, or None
+                - limiting: "physical" or "virtual" (the one reaching zero
+                  first), or None
+                - will_run_out: True when a forecast exists
+                - history_days: days of history (at most 7)
+                - enough_history: True with 7 days of history; the
+                  forecast fields are only set then
+
+            Errors are raised to the caller.
         """
-        predictions = []
-
-        try:
-            # Get all unique pool resources
-            total_result = self.client.query(
-                query="ceilometer_volume_provider_pool_capacity_total"
+        current = {"free": {}, "virtual_free": {}}
+        predicted = {"free": {}, "virtual_free": {}}
+        for field in ("free", "virtual_free"):
+            metric_name = f"{POOL_METRIC_PREFIX}{field}"
+            query = (
+                f"max by (resource) (last_over_time("
+                f"{metric_name}[{stale_window()}]))"
             )
+            for metric in self.client.query(query=query) or []:
+                name = metric.labels.get("resource")
+                if name:
+                    current[field][name] = number(metric.value)
+            query = (
+                f"max by (resource) (predict_linear("
+                f"{metric_name}[{FORECAST_HISTORY}], "
+                f"{FORECAST_HORIZON_DAYS} * 86400))"
+            )
+            for metric in self.client.query(query=query) or []:
+                name = metric.labels.get("resource")
+                if name:
+                    predicted[field][name] = number(metric.value)
 
-            if not total_result:
-                return predictions
+        history = {}
+        for metric in self.client.query(query=pool_history_query()) or []:
+            name = metric.labels.get("resource")
+            if name:
+                history[name] = number(metric.value)
 
-            # For each pool, calculate prediction
-            for pool_metric in total_result:
-                pool_name = pool_metric.labels.get("resource", "unknown")
-
-                # Get current free capacity
-                free_query = f'ceilometer_volume_provider_pool_capacity_free{{resource="{pool_name}"}}'
-                free_result = self.client.query(query=free_query)
-                current_free = 0.0
-                if free_result and len(free_result) > 0:
-                    current_free = float(free_result[0].value)
-
-                # Predict free capacity in 30 days based on 7 days of history
-                # predict_linear(metric[7d], 30 * 86400) predicts value 30 days from now
-                predict_query = f'predict_linear(ceilometer_volume_provider_pool_capacity_free{{resource="{pool_name}"}}[7d], 30 * 86400)'
-
-                predict_result = self.client.query(query=predict_query)
-
-                prediction_data = {
-                    "name": pool_name,
-                    "current_free": current_free,
-                    "predicted_value": None,
-                    "days_until_full": None,
-                    "will_run_out": False,
-                }
-
-                if predict_result and len(predict_result) > 0:
-                    predicted_value = float(predict_result[0].value)
-                    prediction_data["predicted_value"] = predicted_value
-
-                    # If predicted to go below zero, calculate when
-                    if predicted_value < 0 and current_free > 0:
-                        # Linear interpolation to find when it crosses zero
-                        # current_free - (days_until_full / 30) * (current_free - predicted_value) = 0
-                        # Solve for days_until_full
-                        decline_per_day = (current_free - predicted_value) / 30
-                        if decline_per_day > 0:
-                            days_until_full = current_free / decline_per_day
-                            prediction_data["days_until_full"] = round(
-                                days_until_full, 1
-                            )
-                            prediction_data["will_run_out"] = True
-
-                predictions.append(prediction_data)
-
-        except Exception:
-            # Return empty list on error
-            return []
-
+        predictions = []
+        for name in sorted(current["free"].keys() | current["virtual_free"]):
+            seconds = history.get(name) or 0.0
+            enough = seconds >= FORECAST_MIN_HISTORY_SECONDS
+            prediction = {
+                "name": name,
+                "current_free": current["free"].get(name),
+                "current_virtual_free": current["virtual_free"].get(name),
+                "days_physical": None,
+                "days_virtual": None,
+                "days_until_full": None,
+                "limiting": None,
+                "will_run_out": False,
+                "history_days": round(min(seconds / 86400.0, 7.0), 1),
+                "enough_history": enough,
+            }
+            if enough:
+                prediction["days_physical"] = days_until_zero(
+                    current["free"].get(name), predicted["free"].get(name)
+                )
+                prediction["days_virtual"] = days_until_zero(
+                    current["virtual_free"].get(name),
+                    predicted["virtual_free"].get(name),
+                )
+                candidates = [
+                    (days, limiting)
+                    for days, limiting in (
+                        (prediction["days_physical"], "physical"),
+                        (prediction["days_virtual"], "virtual"),
+                    )
+                    if days is not None
+                ]
+                if candidates:
+                    days, limiting = min(candidates)
+                    prediction["days_until_full"] = days
+                    prediction["limiting"] = limiting
+                    prediction["will_run_out"] = True
+            predictions.append(prediction)
         return predictions
 
     def query_matrix(self, query, ndigits=None, time=None):
@@ -535,6 +561,28 @@ class PrometheusTelemetryClient(DatasourceClient):
                     points.append([float(timestamp), sample])
             series.append((result.get("metric", {}), points))
         return series
+
+    # Storage Health (queries in grian_ui.datasource.prometheus_storage)
+
+    def get_volume_services(self) -> list:
+        """Get the current status of every Cinder service (one query)."""
+        return prometheus_storage.get_services(self)
+
+    def get_volume_service_history(self, at: float = None) -> dict:
+        """Get the 24-hour Cinder service history (one query)."""
+        return prometheus_storage.get_service_history(self, at)
+
+    def get_storage_capacity_trend(
+        self, range_key: str, pools: list = None, at: float = None
+    ) -> dict:
+        """Get the capacity trend (one query)."""
+        return prometheus_storage.get_capacity_trend(
+            self, range_key, pools, at
+        )
+
+    def get_storage_images(self) -> dict:
+        """Get the image and backup totals (one query)."""
+        return prometheus_storage.get_images_and_backups(self)
 
     def get_compute_host_snapshot(self) -> dict:
         """

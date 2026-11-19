@@ -16,6 +16,7 @@ documentation for details.
    :caption: Contents:
 
    admin-volume-metrics
+   user-storage-health
    admin-compute-host-health
    user-compute-host-health
    admin-instance-health
