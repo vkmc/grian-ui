@@ -1,0 +1,58 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading">
+    <h3 class="panel-title"><i class="fa fa-area-chart" aria-hidden="true"></i>
+      {% if by == "project" %}{% blocktrans with resource=resource_label range=trend_range %}{{ resource }} over the last {{ range }}, by project{% endblocktrans %}
+      {% elif project_filter %}{% blocktrans with resource=resource_label range=trend_range project=project_filter.label %}{{ resource }} over the last {{ range }}, instances of {{ project }}{% endblocktrans %}
+      {% else %}{% blocktrans with resource=resource_label range=trend_range %}{{ resource }} over the last {{ range }}, by instance{% endblocktrans %}{% endif %}
+      <span class="tc-bounded">{% blocktrans with n=chart_series %}top {{ n }} + other{% endblocktrans %}</span></h3>
+  </div>
+  <div class="panel-body">
+  {% if error_message %}
+  <div data-tc-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+  {% include "admin/top_consumers/_retry.html" %}
+  <script>tc.destroyChart('trend');</script>
+  {% elif not has_data %}
+  <p class="text-muted text-center" style="padding: 20px; margin: 0;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with range=trend_range %}No usage data in the last {{ range }}.{% endblocktrans %}</p>
+  <script>tc.destroyChart('trend');</script>
+  {% else %}
+  <div class="tc-legend tc-muted" id="tc-trend-legend-{{ uid }}"></div>
+  <div class="tc-chart"><canvas id="tc-trend-canvas-{{ uid }}" role="img" aria-label="{% trans 'Stacked usage over time' %}" aria-describedby="tc-trend-summary-{{ uid }}"></canvas></div>
+  <p class="sr-only" id="tc-trend-summary-{{ uid }}">{% if total_summary %}{% blocktrans with latest=total_summary.latest min=total_summary.min max=total_summary.max %}Total: latest {{ latest }}, lowest {{ min }}, highest {{ max }}. The table above lists the current values of each row.{% endblocktrans %}{% endif %}</p>
+  {% with data_id="tc-trend-data-"|add:uid %}{{ chart|json_script:data_id }}{% endwith %}
+  {% if data_stale %}<p class="text-warning" style="margin: 6px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>{% endif %}
+  {% if data_old and not data_stale %}<p style="margin: 6px 0 0;"><i class="fa fa-refresh" aria-hidden="true"></i> {% trans "Refreshing: the data shown may be out of date." %}</p>{% endif %}
+  <p class="tc-muted" style="margin: 6px 0 0;">{% trans "Stacked: the top edge is the total. Saw-tooth shapes are typical of batch or CI workloads. Gaps mean no data." %}</p>
+  <script>
+  (function () {
+    var d = tc.readJson('tc-trend-data-{{ uid }}');
+    var legend = document.getElementById('tc-trend-legend-{{ uid }}');
+    var datasets = d.datasets.map(function (s) {
+      var color = tc.color(s.color);
+      var item = document.createElement('span');
+      var sw = document.createElement('span');
+      sw.className = 'tc-sw';
+      sw.style.background = color;
+      item.appendChild(sw);
+      item.appendChild(document.createTextNode(s.label));
+      legend.appendChild(item);
+      return { label: s.label, data: s.values, borderColor: color, backgroundColor: tc.alpha(color, .55),
+        fill: s.fill, borderWidth: 2, pointRadius: 0, tension: .2 };
+    });
+    tc.replaceChart('trend', document.getElementById('tc-trend-canvas-{{ uid }}'), {
+      type: 'line',
+      data: { labels: d.timestamps.map(function (t) { return tc.formatTime(t, d.range); }), datasets: datasets },
+      options: {
+        maintainAspectRatio: false, animation: false, spanGaps: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + tc.formatValue(c.parsed.y, d.unit); } } } },
+        scales: { y: { stacked: true, min: 0, ticks: { callback: function (v) { return tc.formatValue(v, d.unit); } } },
+          x: { ticks: { maxTicksLimit: 8 } } }
+      }
+    });
+  })();
+  </script>
+  {% endif %}
+  </div>
+</div>

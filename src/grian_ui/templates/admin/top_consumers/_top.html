@@ -1,0 +1,122 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading">
+    <h3 class="panel-title" style="display: inline-block;"><i class="fa fa-trophy" aria-hidden="true"></i>
+      {% if by == "project" %}{% blocktrans with resource=resource_label %}{{ resource }}: top projects{% endblocktrans %}
+      {% elif project_filter %}{% blocktrans with resource=resource_label project=project_filter.label %}{{ resource }}: top instances of {{ project }}{% endblocktrans %}
+      {% else %}{% blocktrans with resource=resource_label %}{{ resource }}: top instances{% endblocktrans %}{% endif %}
+      <span class="tc-bounded">{% blocktrans with n=top_limit %}top {{ n }}{% endblocktrans %}</span></h3>
+    {% if project_filter %}
+    <div class="pull-right">
+      <button type="button" id="tc-clear-project" class="btn btn-default btn-xs" onclick="tc.set({project: ''})"><i class="fa fa-times" aria-hidden="true"></i> {% trans "All instances" %}</button>
+    </div>
+    {% endif %}
+    <div class="clearfix"></div>
+  </div>
+
+  {% if error_message %}
+  <div class="panel-body"><div data-tc-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "admin/top_consumers/_retry.html" %}</div>
+  <script>tc.sparks.forEach(function (c) { c.destroy(); }); tc.sparks = [];</script>
+  {% else %}
+  <div class="table-responsive">
+    <table class="table table-striped table-hover tc-table" style="margin-bottom: 0;">
+      <thead>
+        <tr>
+          <th class="tc-rank">#</th>
+          <th>{% if by == "project" %}{% trans "Project" %}{% else %}{% trans "Instance" %}{% endif %}</th>
+          {% if by == "project" %}<th class="text-right">{% trans "Instances" %}</th>{% else %}<th>{% trans "Project" %}</th>{% endif %}
+          <th class="text-right">{% blocktrans with resource=resource_label %}{{ resource }} now{% endblocktrans %}</th>
+          <th>{% trans "Share of total in use" %}</th>
+          {% if has_allocation %}
+          <th class="text-right">{% if resource == "cpu" %}{% trans "vCPUs" %}{% else %}{% trans "Flavor RAM" %}{% endif %}</th>
+          <th>{% trans "Used ÷ allocated" %}</th>
+          {% endif %}
+          {% if by == "project" %}<th>{% blocktrans with range=trend_range %}CPU, {{ range }}{% endblocktrans %}</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td class="tc-rank">{{ forloop.counter }}</td>
+          <td><span class="tc-sw" data-tc-color="{{ row.color|default_if_none:'' }}" aria-hidden="true"></span>
+            {% if by == "project" %}<a href="#" id="tc-project-{{ forloop.counter }}" class="tc-link" data-tc-project="{{ row.id }}" title="{% trans 'List the instances of this project' %}">{{ row.label }}</a>
+            {% elif row.url %}<a href="{{ row.url }}" class="tc-link" title="{{ row.id }}">{{ row.label }}</a>
+            {% else %}<strong title="{{ row.id }}">{{ row.label }}</strong>{% endif %}</td>
+          {% if by == "project" %}
+          <td class="text-right">{{ row.instances|default_if_none:"–" }}</td>
+          {% elif project_filter %}
+          <td>{{ row.project_label }}</td>
+          {% else %}
+          <td><a href="#" class="tc-link" data-tc-project="{{ row.project_id }}" title="{% trans 'List the instances of this project' %}">{{ row.project_label }}</a></td>
+          {% endif %}
+          <td class="text-right">{{ row.value_text }}</td>
+          <td><span class="tc-bar tc-share" aria-hidden="true"><span style="width: {{ row.share|floatformat:'1u' }}%;" data-tc-color="{{ row.color|default_if_none:'' }}"></span></span>{{ row.share|floatformat:0 }}%</td>
+          {% if has_allocation %}
+          <td class="text-right">{{ row.allocated_text }}</td>
+          <td>{% if row.ratio is None %}<span class="text-muted">{% trans "n/a" %}</span>{% else %}<span class="tc-bar tc-ratio{% if row.level %} tc-{{ row.level }}{% endif %}" aria-hidden="true"><span style="width: {% if row.ratio > 100 %}100{% else %}{{ row.ratio|floatformat:'1u' }}{% endif %}%;"></span></span>{{ row.ratio_shown }}%{% if row.level == "busy" %} <span class="text-danger">{% trans "busy" %}</span>{% elif row.level == "idle" %} <span class="text-muted">{% trans "mostly idle" %}</span>{% endif %}{% endif %}</td>
+          {% endif %}
+          {% if by == "project" %}
+          <td><canvas class="tc-spark" data-tc-spark="{{ row.key }}" data-tc-color="{{ row.color|default_if_none:'' }}" width="110" height="28" aria-hidden="true"></canvas>{% if row.spark_summary %}<span class="sr-only">{% blocktrans with latest=row.spark_summary.latest min=row.spark_summary.min max=row.spark_summary.max %}latest {{ latest }}, lowest {{ min }}, highest {{ max }}{% endblocktrans %}</span>{% endif %}</td>
+          {% endif %}
+        </tr>
+        {% empty %}
+        <tr><td colspan="{{ columns }}" class="text-center tc-muted" style="padding: 20px;">
+          {% if project_filter %}{% blocktrans with project=project_filter.label window=current_window %}{{ project }} has no running instance that reported in the last {{ window }}.{% endblocktrans %}
+          {% else %}{% blocktrans with window=current_window %}No running instance has reported usage in the last {{ window }}.{% endblocktrans %}{% endif %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="panel-footer tc-muted">
+    {% for note in partial_notes %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {{ note }}</p>{% endfor %}{% if partial_notes %}{% include "admin/top_consumers/_retry.html" %}{% endif %}
+    {% if data_stale %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>{% endif %}
+    {% if data_old and not data_stale %}<p style="margin: 0 0 4px;"><i class="fa fa-refresh" aria-hidden="true"></i> {% trans "Refreshing: the data shown may be out of date." %}</p>{% endif %}
+    {% if names_loading %}<p style="margin: 0 0 4px;"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading the project names from the Identity service: showing project IDs meanwhile." %}</p>
+    {% elif names_failed and names_missing %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Project names could not be loaded from the Identity service: showing project IDs." %}</p>
+    {% elif names_failed %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% blocktrans with at=names_ts %}The Identity service could not be reached: showing the project names received at <span class="tc-clock" data-ts="{{ at }}"></span>.{% endblocktrans %}</p>{% endif %}
+    <i class="fa fa-info-circle" aria-hidden="true"></i>
+    {% if by == "project" %}
+    {% blocktrans with shown=rows|length count n=count %}{{ n }} project with running instances, {{ shown }} shown.{% plural %}{{ n }} projects with running instances, {{ shown }} shown.{% endblocktrans %}
+    {% if idle_projects %}{% blocktrans with names=idle_projects|join:", " %}Projects with nothing running are not listed: {{ names }}{% endblocktrans %}{% if idle_more %} {% blocktrans count n=idle_more %}and {{ n }} more{% plural %}and {{ n }} more{% endblocktrans %}{% endif %}.{% endif %}
+    {% trans "Click a project to list its instances." %}
+    {% elif count is None %}
+    {% blocktrans count shown=rows|length %}Number of running instances unknown, {{ shown }} shown.{% plural %}Number of running instances unknown, {{ shown }} shown.{% endblocktrans %}
+    {% else %}
+    {% blocktrans with shown=rows|length count n=count %}{{ n }} running instance, {{ shown }} shown.{% plural %}{{ n }} running instances, {{ shown }} shown.{% endblocktrans %}
+    {% endif %}
+    {% if has_allocation and thresholds %}{% blocktrans with busy=thresholds.usage_busy idle=thresholds.usage_idle %}Used ÷ allocated: busy at {{ busy }}% or more, mostly idle under {{ idle }}% (a candidate for a quota or rightsizing conversation).{% endblocktrans %}{% endif %}
+    {% trans "The swatch colour matches the chart below; grey rows are part of “Other”." %}
+    {% if names_ts and not names_failed %}<br>{% blocktrans with at=names_ts count minutes=names_minutes %}Project names from <span class="tc-clock" data-ts="{{ at }}"></span> (refreshed every {{ minutes }} minute){% plural %}Project names from <span class="tc-clock" data-ts="{{ at }}"></span> (refreshed every {{ minutes }} minutes){% endblocktrans %}{% if names_old %} {% trans "(possibly out of date)" %}{% endif %}.{% endif %}
+  </div>
+  {% with data_id="tc-sparks-"|add:uid %}{{ sparks|json_script:data_id }}{% endwith %}
+  <script>
+  (function () {
+    var root = document.getElementById('tc-sparks-{{ uid }}').closest('.panel');
+    // colours from the fixed palette (also used by the chart)
+    root.querySelectorAll('.tc-sw[data-tc-color], .tc-share [data-tc-color]').forEach(function (el) {
+      var c = el.getAttribute('data-tc-color');
+      el.style.background = tc.color(c === '' ? null : parseInt(c, 10));
+    });
+    tc.showClocks(root);
+    tc.sparks.forEach(function (c) { c.destroy(); });
+    tc.sparks = [];
+    var sparks = tc.readJson('tc-sparks-{{ uid }}') || {};
+    root.querySelectorAll('canvas[data-tc-spark]').forEach(function (canvas) {
+      var data = sparks[canvas.getAttribute('data-tc-spark')];
+      if (!Array.isArray(data) || !data.some(function (v) { return v !== null; })) { return; }
+      var c = canvas.getAttribute('data-tc-color');
+      tc.sparks.push(new Chart(canvas, {
+        type: 'line',
+        data: { labels: data.map(function () { return ''; }),
+          datasets: [{ data: data, spanGaps: false, borderWidth: 1.5, pointRadius: 0, tension: .3, fill: false,
+            borderColor: tc.color(c === '' ? null : parseInt(c, 10)) }] },
+        options: { responsive: false, animation: false,
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
+          scales: { x: { display: false }, y: { display: false, min: 0 } } }
+      }));
+    });
+  })();
+  </script>
+  {% endif %}
+</div>

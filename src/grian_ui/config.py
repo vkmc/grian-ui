@@ -173,6 +173,37 @@ def get_cache_max_item_bytes():
     return value
 
 
+#: Default Top Consumers thresholds: used ÷ allocated percentages at or
+#: above which a project or instance is busy, and below which it is mostly
+#: idle.
+DEFAULT_TOP_CONSUMERS_THRESHOLDS = {
+    "usage_idle": 10,
+    "usage_busy": 80,
+}
+
+
+def get_top_consumers_thresholds():
+    """
+    Get the Top Consumers used ÷ allocated thresholds (percent).
+
+    Defaults (DEFAULT_TOP_CONSUMERS_THRESHOLDS) can be overridden per key
+    with ``GRIAN_PLUGIN['top_consumers_thresholds']``. ``usage_idle`` must
+    not be greater than ``usage_busy``. See get_thresholds().
+
+    Raises:
+        ConfigurationError: If an override is unknown or out of range
+    """
+    thresholds = get_thresholds(
+        "top_consumers_thresholds", DEFAULT_TOP_CONSUMERS_THRESHOLDS
+    )
+    if thresholds["usage_idle"] > thresholds["usage_busy"]:
+        raise ConfigurationError(
+            "GRIAN_PLUGIN['top_consumers_thresholds']['usage_idle'] must "
+            "not be greater than 'usage_busy'"
+        )
+    return thresholds
+
+
 def get_openstack_keystone_url():
     """Get OpenStack Keystone URL from settings."""
     url = getattr(settings, "OPENSTACK_KEYSTONE_URL", None)

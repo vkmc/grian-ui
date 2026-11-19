@@ -1,0 +1,68 @@
+{% load i18n %}
+{% if error_message %}
+<div data-tc-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "admin/top_consumers/_retry.html" %}
+{% elif not totals.projects %}
+<div class="panel panel-default"><div class="panel-body tc-empty">
+  <i class="fa fa-trophy" aria-hidden="true"></i>
+  <h4>{% trans "No instance usage available" %}</h4>
+  <p>{% blocktrans with window=current_window %}No running instance has reported usage in the last {{ window }}.{% endblocktrans %}</p>
+  <p class="tc-muted">{% trans "These metrics come from the Ceilometer compute agent, which polls the running instances. Check that it runs on the compute nodes, and that sg-core, Prometheus and Aetos receive its samples." %}</p>
+</div></div>
+{% else %}
+<div class="row tc-cards">
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel tc-card"><div class="panel-heading">
+      <i class="fa fa-microchip tc-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="tc-value">{{ cards.cpu }}</div>
+        <div class="tc-label">{% trans "CPU in use" %}</div>
+        <div class="tc-sub">{% if cards.cpu_ratio is not None %}{% blocktrans with alloc=cards.vcpus ratio=cards.cpu_ratio|floatformat:0 %}of {{ alloc }} allocated ({{ ratio }}%){% endblocktrans %}{% else %}{% trans "no allocation reported" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel tc-card"><div class="panel-heading">
+      <i class="fa fa-server tc-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="tc-value">{{ cards.memory }}</div>
+        <div class="tc-label">{% trans "Memory in use" %}</div>
+        <div class="tc-sub">{% if cards.memory_ratio is not None %}{% blocktrans with alloc=cards.memory_alloc ratio=cards.memory_ratio|floatformat:0 %}of {{ alloc }} allocated ({{ ratio }}%){% endblocktrans %}{% else %}{% trans "no allocation reported" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel tc-card"><div class="panel-heading">
+      <i class="fa fa-hdd-o tc-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="tc-value">{{ cards.disk }}</div>
+        <div class="tc-label">{% trans "Disk I/O" %}</div>
+        <div class="tc-sub">{% blocktrans with r=cards.disk_read w=cards.disk_write %}read {{ r }} | write {{ w }}{% endblocktrans %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel tc-card"><div class="panel-heading">
+      <i class="fa fa-exchange tc-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="tc-value">{{ cards.network }}</div>
+        <div class="tc-label">{% trans "Network" %}</div>
+        <div class="tc-sub">{% blocktrans with i=cards.net_in o=cards.net_out %}in {{ i }} | out {{ o }}{% endblocktrans %}</div>
+      </div>
+    </div></div>
+  </div>
+</div>
+<div class="tc-muted">{% blocktrans with i=totals.instances|default_if_none:0 window=current_window count n=totals.projects %}Running instances reporting in the last {{ window }}: {{ i }}, in {{ n }} project.{% plural %}Running instances reporting in the last {{ window }}: {{ i }}, in {{ n }} projects.{% endblocktrans %}</div>
+{% endif %}
+{% if fetched_at and not error_message %}
+{% if data_stale %}
+<div class="alert alert-warning" style="margin: 8px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
+  {% blocktrans %}Telemetry data could not be refreshed. Showing the last data received, from <span class="tc-clock" data-ts="{{ fetched_ts }}"></span>.{% endblocktrans %}</div>
+{% elif data_old %}
+<div class="alert alert-info" style="margin: 8px 0 0;"><i class="fa fa-refresh" aria-hidden="true"></i>
+  {% blocktrans %}Refreshing: the data shown may be out of date (from <span class="tc-clock" data-ts="{{ fetched_ts }}"></span>).{% endblocktrans %}</div>
+{% else %}
+<div class="tc-muted text-right" style="margin-top: 4px;">{% trans "Data from" %} <span class="tc-clock" data-ts="{{ fetched_ts }}"></span></div>
+{% endif %}
+<script>tc.showClocks(document.getElementById('tc-summary'));</script>
+{% endif %}
