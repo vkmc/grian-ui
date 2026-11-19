@@ -1,0 +1,100 @@
+{% load i18n %}
+{% if error_message %}
+{% include "admin/network_health/_error.html" %}
+{% else %}
+{% with v=summary.verdict %}
+<div class="nh-verdict nh-verdict-{{ v.level }}">
+  {% if v.key == "platform" %}
+  <h4><i class="fa fa-exclamation-circle text-danger" aria-hidden="true"></i>
+    {% if summary.dead_gateways %}{% blocktrans with hosts=summary.dead_gateways|join:", " n=summary.routers_quiet m=summary.quiet_projects_total %}Platform problem: gateway {{ hosts }} is down and {{ n }} routers in {{ m }} projects lost traffic{% endblocktrans %}{% else %}{% blocktrans with a=summary.agents_dead n=summary.routers_quiet m=summary.quiet_projects_total %}Platform problem: {{ a }} network agents are down and {{ n }} routers in {{ m }} projects lost traffic{% endblocktrans %}{% endif %}</h4>
+  <div>{% blocktrans with agents=summary.dead_agents|join:", " %}Not alive: {{ agents }}.{% endblocktrans %}
+    {% blocktrans with projects=summary.quiet_projects|join:", " %}Projects affected: {{ projects }}{% endblocktrans %}{% if summary.quiet_projects_total > summary.quiet_projects|length %} …{% endif %}.
+    <br><strong>{% trans "What to do:" %}</strong> {% trans "check the network agents on those hosts first (ovn-controller for ML2/OVN). Expect tickets from those projects." %}</div>
+  {% elif v.key == "many_projects_quiet" %}
+  <h4><i class="fa fa-exclamation-circle text-danger" aria-hidden="true"></i>
+    {% blocktrans with n=summary.routers_quiet m=summary.quiet_projects_total %}{{ n }} routers in {{ m }} projects lost traffic at the same time{% endblocktrans %}</h4>
+  <div>{% blocktrans with projects=summary.quiet_projects|join:", " %}Projects affected: {{ projects }}{% endblocktrans %}{% if summary.quiet_projects_total > summary.quiet_projects|length %} …{% endif %}.
+    {% trans "Several projects at once points to the platform, although every agent is alive: check the gateway nodes and the network back end (for ML2/OVN, the OVN databases and northd)." %}</div>
+  {% elif v.key == "agents_down" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=summary.agents_dead %}{{ n }} network agent not alive{% plural %}{{ n }} network agents not alive{% endblocktrans %}</h4>
+  <div>{{ summary.dead_agents|join:", " }}{% if summary.agents_dead > summary.dead_agents|length %} …{% endif %}.
+    {% if summary.routers_checked %}{% trans "No traffic impact is visible yet." %}{% endif %}</div>
+  {% elif v.key == "one_project_quiet" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=summary.routers_quiet %}A router of one project went quiet{% plural %}Routers of one project went quiet{% endblocktrans %}</h4>
+  <div>{% blocktrans with project=summary.quiet_projects.0 %}Only {{ project }} is affected, so the platform is probably fine: check that project's routers, instances and security groups.{% endblocktrans %}</div>
+  {% elif v.key == "routers_error" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=summary.routers_not_active %}{{ n }} router is not ACTIVE{% plural %}{{ n }} routers are not ACTIVE{% endblocktrans %}</h4>
+  <div>{{ summary.not_active_routers|join:", " }}{% if summary.routers_not_active > summary.not_active_routers|length %} …{% endif %}.</div>
+  {% elif v.key == "packet_loss" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=summary.interfaces_lossy %}Packet drops or errors on {{ n }} interface{% plural %}Packet drops or errors on {{ n }} interfaces{% endblocktrans %}</h4>
+  <div>{% blocktrans count n=summary.lossy_projects_total %}In {{ n }} project. See "Drops and errors by project" below.{% plural %}In {{ n }} projects. See "Drops and errors by project" below.{% endblocktrans %}</div>
+  {% elif v.key == "floating_ips_down" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=summary.floating_ips.associated_down %}{{ n }} associated floating IP is DOWN{% plural %}{{ n }} associated floating IPs are DOWN{% endblocktrans %}</h4>
+  <div>{% trans "See Floating IPs below." %}</div>
+  {% elif not summary.inventory_checked %}
+  <h4><i class="fa fa-info-circle text-muted" aria-hidden="true"></i> {% trans "No problems detected in the interface telemetry" %}</h4>
+  <div>{% trans "No drops or errors. The Networking API data is not available: agents, routers and floating IPs are not checked." %}</div>
+  {% else %}
+  <h4><i class="fa fa-check-circle text-success" aria-hidden="true"></i> {% trans "No network problems detected" %}</h4>
+  <div>{% blocktrans count n=summary.agents_total %}{{ n }} agent alive{% plural %}{{ n }} agents alive{% endblocktrans %}{% if summary.traffic_checked %}, {% trans "no router gone quiet, no drops or errors." %}{% else %}.{% endif %}
+    {% if summary.routers_checked and summary.routers_total and not summary.routers_judged %}<br><i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with pps=thresholds.quiet_min_pps %}Instance traffic is too low (under {{ pps }} packets/s per interface) to detect routers gone quiet; agents, drops and errors are still checked.{% endblocktrans %}{% endif %}</div>
+  {% endif %}
+</div>
+{% endwith %}
+<div class="row nh-cards">
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel nh-card {% if not summary.inventory_checked %}nh-none{% elif summary.agents_dead %}nh-crit{% elif summary.agents_total %}nh-ok{% else %}nh-none{% endif %}">
+      <div class="panel-heading">
+        <i class="fa fa-cogs nh-icon" aria-hidden="true"></i>
+        <div class="text-right" style="flex: 1;">
+          <div class="nh-value">{% if summary.inventory_checked %}{{ summary.agents_alive }}<small> / {{ summary.agents_total }}</small>{% else %}–{% endif %}</div>
+          <div class="nh-label">{% trans "Network agents alive" %}</div>
+          <div class="nh-sub">{% if not summary.inventory_checked %}{% trans "not checked" %}{% elif summary.agents_dead %}{% blocktrans count n=summary.agents_dead %}{{ n }} not alive{% plural %}{{ n }} not alive{% endblocktrans %}{% elif summary.agents_total %}{% trans "all alive" %}{% else %}{% trans "no agents listed" %}{% endif %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel nh-card {% if not summary.routers_checked %}nh-none{% elif summary.quiet_projects_total >= 2 %}nh-crit{% elif summary.routers_quiet %}nh-warn{% else %}nh-ok{% endif %}">
+      <div class="panel-heading">
+        <i class="fa fa-arrows-alt nh-icon" aria-hidden="true"></i>
+        <div class="text-right" style="flex: 1;">
+          <div class="nh-value">{% if summary.routers_checked %}{{ summary.routers_quiet }}{% else %}–{% endif %}{% if summary.inventory_checked %}<small> / {{ summary.routers_total }}</small>{% endif %}</div>
+          <div class="nh-label">{% trans "Routers gone quiet" %}</div>
+          <div class="nh-sub">{% if not summary.routers_checked %}{% trans "not checked" %}{% elif summary.routers_quiet %}{% blocktrans count n=summary.quiet_projects_total %}in {{ n }} project{% plural %}in {{ n }} projects{% endblocktrans %}{% elif summary.routers_total and not summary.routers_judged %}{% trans "traffic too low to judge" %}{% else %}{% blocktrans with n=summary.routers_judged %}{{ n }} judged, all normal{% endblocktrans %}{% endif %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel nh-card {% if not summary.traffic_checked %}nh-none{% elif summary.interfaces_lossy %}nh-warn{% else %}nh-ok{% endif %}">
+      <div class="panel-heading">
+        <i class="fa fa-random nh-icon" aria-hidden="true"></i>
+        <div class="text-right" style="flex: 1;">
+          <div class="nh-value">{% if summary.traffic_checked %}{{ summary.interfaces_lossy }}{% else %}–{% endif %}<small> / {{ summary.interfaces_total }}</small></div>
+          <div class="nh-label">{% trans "Interfaces dropping packets" %}</div>
+          <div class="nh-sub">{% if not summary.traffic_checked %}{% trans "not checked" %}{% elif summary.interfaces_lossy %}{% blocktrans with lost=summary.lost_pps|floatformat:"-2" %}{{ lost }} packets lost/s{% endblocktrans %}{% else %}{% trans "no drops or errors" %}{% endif %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel nh-card nh-info">
+      <div class="panel-heading">
+        <i class="fa fa-exchange nh-icon" aria-hidden="true"></i>
+        <div class="text-right" style="flex: 1;">
+          <div class="nh-value">{{ summary.in_text }}</div>
+          <div class="nh-label">{% trans "Cloud traffic in" %}</div>
+          <div class="nh-sub">{% blocktrans with out=summary.out_text %}{{ out }} out{% endblocktrans %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% include "admin/network_health/_notes.html" %}
+{% endif %}

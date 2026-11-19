@@ -14,6 +14,7 @@ from keystoneauth1.identity import v3
 from observabilityclient.utils import metric_utils as obs_client_utils
 
 from grian_ui import config
+from grian_ui.datasource import prometheus_network
 from grian_ui.datasource.api import DatasourceClient
 
 
@@ -351,6 +352,18 @@ class PrometheusTelemetryClient(DatasourceClient):
                     points.append([float(timestamp), sample])
             series.append((result.get("metric", {}), points))
         return series
+
+    # Network health (queries in grian_ui.datasource.prometheus_network)
+
+    def get_network_interfaces(self) -> dict:
+        """Get the per-interface packet rates and the cloud traffic."""
+        return prometheus_network.get_interfaces(self)
+
+    def get_network_traffic_trend(
+        self, range_key: str, at: float = None
+    ) -> dict:
+        """Get the cloud traffic trend (one query)."""
+        return prometheus_network.get_traffic_trend(self, range_key, at)
 
 
 def get_client(request) -> DatasourceClient:

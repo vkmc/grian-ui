@@ -1,0 +1,16 @@
+---
+features:
+  - |
+    Add the Network Health dashboard under Admin > Telemetry. It tells
+    whether the network is healthy and whether a problem is the platform's
+    or one project's: network agents from the Networking API, routers
+    whose traffic fell compared with the same time a week
+    before (Neutron keeps
+    reporting them ACTIVE when their gateway node is down), packet drops
+    and errors by project, floating IP states and cloud traffic, based on
+    the Ceilometer ``network.*`` meters. Every panel renders a bounded
+    amount of data. The Networking API is read once per region every two
+    minutes (the full port list every five minutes) and shared by every
+    administrator; only the metrics are queried with every refresh. Thresholds can be configured with
+    ``GRIAN_PLUGIN['network_health_thresholds']`` and the rate window with
+    ``GRIAN_PLUGIN['network_health_rate_window']``.

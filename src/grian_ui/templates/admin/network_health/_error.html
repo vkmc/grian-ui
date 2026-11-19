@@ -1,0 +1,3 @@
+{# The section's required data is not available. #}
+<div data-nh-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: {{ margin|default:'0' }};"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "admin/network_health/_retry.html" %}

@@ -61,3 +61,30 @@ class DatasourceClient(ABC):
     def get_capacity_predictions(self) -> list:
         """Get capacity predictions for storage pools."""
         pass
+
+    @abstractmethod
+    def get_network_interfaces(self) -> dict:
+        """
+        Get the inbound, usual and lost packet rates of every instance
+        interface, plus the cloud's traffic.
+
+        Returns:
+            dict: ``{"interfaces": [{"key", "project", "in_pps",
+            "usual_pps", "lost_pps"}], "traffic": {"in_bps", "out_bps"}}``.
+            See :mod:`grian_ui.network_health` for the exact format.
+        """
+        pass
+
+    @abstractmethod
+    def get_network_traffic_trend(
+        self, range_key: str, at: float = None
+    ) -> dict:
+        """
+        Get the cloud's inbound and outbound traffic over a range.
+
+        ``at`` is the evaluation time (epoch), the end of the chart grid.
+
+        Returns:
+            dict: ``{"in": [[ts, bytes/s], ...], "out": [...]}``
+        """
+        pass

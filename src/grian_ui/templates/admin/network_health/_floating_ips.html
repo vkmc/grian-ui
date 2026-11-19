@@ -1,0 +1,24 @@
+{% load i18n %}
+{% if error_message %}
+{% include "admin/network_health/_error.html" %}
+{% elif not counts.total %}
+<div class="nh-empty"><i class="fa fa-globe" aria-hidden="true"></i>{% trans "No floating IPs in the cloud." %}</div>
+{% include "admin/network_health/_notes.html" %}
+{% else %}
+<div class="nh-fip-bar" role="img" aria-label="{% blocktrans with total=counts.total a=counts.active u=counts.unassociated d=counts.associated_down %}{{ total }} floating IPs: {{ a }} active, {{ u }} not associated, {{ d }} associated but DOWN{% endblocktrans %}">
+  {% if counts.active %}<span class="nh-fip-active" style="width: {{ shares.active|floatformat:'1u' }}%;"></span>{% endif %}
+  {% if counts.unassociated %}<span class="nh-fip-unassoc" style="width: {{ shares.unassociated|floatformat:'1u' }}%;"></span>{% endif %}
+  {% if counts.associated_down %}<span class="nh-fip-down" style="width: {{ shares.associated_down|floatformat:'1u' }}%;"></span>{% endif %}
+</div>
+<table class="table table-condensed nh-table" style="margin-top: 10px;">
+  <caption class="sr-only">{% trans "Floating IPs by state" %}</caption>
+  <tbody>
+    <tr><th scope="row"><span class="nh-dot nh-fip-active" style="margin-left: 0;"></span>{% trans "Active" %}</th><td class="text-right">{{ counts.active }}</td></tr>
+    <tr><th scope="row"><span class="nh-dot nh-fip-unassoc" style="margin-left: 0;"></span>{% trans "Not associated (DOWN by design)" %}</th><td class="text-right">{{ counts.unassociated }}</td></tr>
+    <tr{% if counts.associated_down %} class="danger"{% endif %}><th scope="row"><span class="nh-dot nh-fip-down" style="margin-left: 0;"></span>{% trans "Associated but DOWN" %}</th><td class="text-right">{% if counts.associated_down %}<strong>{{ counts.associated_down }}</strong>{% else %}0{% endif %}</td></tr>
+    <tr><th scope="row">{% trans "Total" %}</th><td class="text-right">{{ counts.total }}</td></tr>
+  </tbody>
+</table>
+<p class="nh-muted" style="margin: 6px 0 0;">{% if counts.associated_down %}{% blocktrans count n=counts.associated_down %}{{ n }} associated floating IP is DOWN: check the gateway of its router.{% plural %}{{ n }} associated floating IPs are DOWN: check the gateways of their routers.{% endblocktrans %}{% else %}{% trans "Associated floating IPs are all ACTIVE." %}{% endif %}</p>
+{% include "admin/network_health/_notes.html" %}
+{% endif %}
