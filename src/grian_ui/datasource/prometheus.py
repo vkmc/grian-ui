@@ -832,6 +832,43 @@ class PrometheusTelemetryClient(DatasourceClient):
                 trends[instance_id] = points
         return trends
 
+    # Top consumers (queries in prometheus_top_consumers) ----------------
+
+    def get_top_consumers_projects(self) -> dict:
+        from grian_ui.datasource import prometheus_top_consumers
+
+        return prometheus_top_consumers.get_projects(self)
+
+    def get_top_consumers_instances(
+        self, resource: str, project_id: str = None, limit: int = 10
+    ) -> list:
+        from grian_ui.datasource import prometheus_top_consumers
+
+        return prometheus_top_consumers.get_instances(
+            self, resource, project_id=project_id, limit=limit
+        )
+
+    def get_top_consumers_trend(
+        self,
+        resource: str,
+        by: str,
+        keys: list,
+        project_id: str = None,
+        range_key: str = "24h",
+        at: float = None,
+    ) -> dict:
+        from grian_ui.datasource import prometheus_top_consumers
+
+        return prometheus_top_consumers.get_trend(
+            self,
+            resource,
+            by,
+            keys,
+            project_id=project_id,
+            range_key=range_key,
+            at=at,
+        )
+
 
 def _empty_details():
     return {

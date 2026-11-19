@@ -9,13 +9,11 @@ Provides realistic sample telemetry data.
 import math
 import random  # nosec
 import time
+import uuid
 
 from datetime import datetime
 
 from grian_ui import compute_health
-import uuid
-
-
 from grian_ui import instance_health
 from grian_ui import timeseries
 from grian_ui.datasource.api import DatasourceClient
@@ -373,6 +371,35 @@ class FakeTelemetryClient(DatasourceClient):
             for instance_id in instance_ids
             if symptom in (symptoms.get(instance_id) or {})
         }
+
+    # Top consumers (sample data in fake_top_consumers) ------------------
+
+    def get_top_consumers_projects(self) -> dict:
+        from grian_ui.datasource import fake_top_consumers
+
+        return fake_top_consumers.get_projects()
+
+    def get_top_consumers_instances(
+        self, resource: str, project_id: str = None, limit: int = 10
+    ) -> list:
+        from grian_ui.datasource import fake_top_consumers
+
+        return fake_top_consumers.get_instances(resource, project_id, limit)
+
+    def get_top_consumers_trend(
+        self,
+        resource: str,
+        by: str,
+        keys: list,
+        project_id: str = None,
+        range_key: str = "24h",
+        at: float = None,
+    ) -> dict:
+        from grian_ui.datasource import fake_top_consumers
+
+        return fake_top_consumers.get_trend(
+            resource, by, keys, project_id, range_key, at
+        )
 
 
 def _make_fake_hosts():

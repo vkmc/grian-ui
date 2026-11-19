@@ -201,3 +201,50 @@ class DatasourceClient(ABC):
             dict: instance id -> ``[[ts, v], ...]``
         """
         pass
+
+    # Top consumers (see grian_ui.top_consumers) ---------------------------
+
+    @abstractmethod
+    def get_top_consumers_projects(self) -> dict:
+        """
+        Get the current use and allocation of every project with running
+        instances.
+
+        Returns:
+            dict: ``{"projects": [{"id", "instances", "cpu", "vcpus",
+            "memory", "memory_alloc", "disk_read", "disk_write", "net_in",
+            "net_out"}, ...]}``
+        """
+        pass
+
+    @abstractmethod
+    def get_top_consumers_instances(
+        self, resource: str, project_id: str = None, limit: int = 10
+    ) -> list:
+        """
+        Get the instances using the most of ``resource``.
+
+        Returns:
+            list: at most ``limit`` ``{"id", "name", "project_id",
+            "value", "vcpus", "memory_alloc"}``
+        """
+        pass
+
+    @abstractmethod
+    def get_top_consumers_trend(
+        self,
+        resource: str,
+        by: str,
+        keys: list,
+        project_id: str = None,
+        range_key: str = "24h",
+        at: float = None,
+    ) -> dict:
+        """
+        Get ``resource`` over ``range_key`` (see grian_ui.timeseries) for
+        some projects or instances, plus the total.
+
+        Returns:
+            dict: ``{"series": {key: [[ts, v], ...]}, "total": [...]}``
+        """
+        pass

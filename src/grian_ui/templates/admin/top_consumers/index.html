@@ -1,0 +1,286 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load static %}
+{% block title %}{% trans "Top Consumers" %}{% endblock %}
+
+{% block page_header %}
+  {% include "horizon/common/_page_header.html" with title=_("Top Consumers") %}
+{% endblock page_header %}
+
+{% block main %}
+<!-- HTMX -->
+<script src="{% static 'vendor/htmx.js' %}"></script>
+<!-- Chart.js -->
+<script src="{% static 'vendor/chart.umd.js' %}"></script>
+
+<style>
+.tc-section { margin-bottom: 20px; }
+.tc-toolbar { margin-bottom: 15px; }
+.tc-muted { color: #595959; font-size: 12px; }
+.tc-loading { padding: 25px; text-align: center; color: #666; }
+.tc-card { border: 0; color: #fff; }
+.tc-card .panel-heading { display: flex; align-items: center; min-height: 110px; padding: 18px 15px; color: #fff; border: 0; border-radius: 3px; background: #337ab7; }
+.tc-card .tc-icon { font-size: 3em; opacity: .3; margin-right: 15px; }
+.tc-card .tc-value { font-size: 2.3em; font-weight: 300; line-height: 1; margin-bottom: 4px; }
+.tc-card .tc-label { font-size: .95em; }
+.tc-card .tc-sub { font-size: .85em; margin-top: 3px; }
+/* summary cards: the same height in a row */
+#tc-root .tc-cards { display: flex; flex-wrap: wrap; }
+#tc-root .tc-cards::before, #tc-root .tc-cards::after { display: none; }
+#tc-root .tc-cards > [class*="col-"] { display: flex; }
+#tc-root .tc-cards .tc-card { flex: 1; display: flex; flex-direction: column; }
+#tc-root .tc-cards .tc-card .panel-heading { flex: 1; }
+/* pressed buttons: the theme's #e6e6e6 is 1.3:1 and equals the hover */
+#tc-root .btn-group .btn.active { background-color: #1a4f80; border-color: #1a4f80; color: #fff; font-weight: 600; }
+/* the default theme's .text-muted (#bbb) is 1.9:1 on white */
+#tc-root .text-muted { color: #595959; }
+/* the theme's .text-warning (#8a6d3b) is too light on a striped row */
+#tc-root .text-warning { color: #6b4f1d; }
+#tc-root a.tc-link { color: #1a4f80; font-weight: 600; cursor: pointer; }
+.tc-bounded { font-size: 11px; color: #2b5a2b; background: #dff0d8; border-radius: 3px; padding: 1px 5px; margin-left: 6px; font-weight: normal; }
+.tc-table td, .tc-table th { vertical-align: middle !important; }
+.tc-rank { color: #555; width: 28px; }
+/* swatch: the row's colour in the chart (grey: not drawn on its own) */
+.tc-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+/* share of the total and used ÷ allocated: a bar plus the number */
+.tc-bar { display: inline-block; height: 10px; background: #eee; border-radius: 4px; overflow: hidden; vertical-align: middle; margin-right: 6px; }
+.tc-bar > span { display: block; height: 100%; border-radius: 0 4px 4px 0; }
+.tc-share { width: 140px; }
+.tc-ratio { width: 90px; }
+.tc-ratio > span { background: #337ab7; }
+.tc-ratio.tc-busy > span { background: #b52b27; }
+.tc-ratio.tc-idle > span { background: #9bbbd9; }
+.tc-spark { width: 110px; height: 28px; }
+.tc-chart { position: relative; height: 300px; }
+.tc-legend { margin-bottom: 6px; }
+.tc-legend span { margin-right: 14px; white-space: nowrap; }
+.tc-empty { padding: 35px 20px; text-align: center; color: #595959; }
+.tc-empty .fa { font-size: 3em; opacity: .4; display: block; margin-bottom: 10px; }
+/* how this page is calculated */
+.tc-how > summary { cursor: pointer; }
+.tc-how > summary .panel-title { display: inline; }
+.tc-how-table th, .tc-how-table td { padding: 3px 12px 3px 0; vertical-align: top; }
+.tc-how-table th[scope="row"] { white-space: nowrap; }
+</style>
+
+<script>
+window.tc = window.tc || {};
+tc.charts = tc.charts || {};
+tc.sparks = tc.sparks || [];
+// Categorical order for "top 5 + Other": fixed, never cycled. Checked with
+// a palette validator (colour-vision deficiency and normal-vision
+// separation); the aqua is below 3:1 against white, so the table next to
+// the chart carries the same numbers.
+tc.palette = ['#337ab7', '#eb6834', '#1baf7a', '#b0417a', '#6250d6'];
+tc.other = '#999999';
+tc.color = function (index) {
+  return index === null || index === undefined ? tc.other : tc.palette[index];
+};
+tc.alpha = function (hex, a) {
+  return 'rgba(' + parseInt(hex.slice(1, 3), 16) + ',' + parseInt(hex.slice(3, 5), 16) + ',' +
+    parseInt(hex.slice(5, 7), 16) + ',' + a + ')';
+};
+tc.readJson = function (id) {
+  var el = document.getElementById(id);
+  return el ? JSON.parse(el.textContent) : null;
+};
+tc.formatBytes = function (v) {
+  var units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'], i = 0;
+  while (Math.abs(v) >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 || Math.abs(v) >= 100 ? Math.round(v) : +v.toFixed(v >= 10 ? 1 : 2)) + ' ' + units[i];
+};
+tc.formatValue = function (v, unit) {
+  if (v === null || v === undefined) { return '–'; }
+  if (unit === 'cores') { return +v.toFixed(v < 10 ? 2 : 1) + ' {% filter escapejs %}{% trans "cores" %}{% endfilter %}'; }
+  if (unit === 'mib') { return tc.formatBytes(v * 1048576); }
+  return tc.formatBytes(v) + '/s';
+};
+tc.formatTime = function (ts, range) {
+  var d = new Date(ts * 1000);
+  if (range === '7d') {
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+tc.showClocks = function (root) {
+  root.querySelectorAll('.tc-clock').forEach(function (el) {
+    el.textContent = tc.formatClock(parseInt(el.getAttribute('data-ts'), 10));
+  });
+};
+tc.formatClock = function (ts) {
+  return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+tc.replaceChart = function (key, canvas, config) {
+  if (tc.charts[key]) { tc.charts[key].destroy(); }
+  tc.charts[key] = canvas ? new Chart(canvas, config) : null;
+};
+tc.destroyChart = function (key) {
+  if (tc.charts[key]) { tc.charts[key].destroy(); tc.charts[key] = null; }
+};
+tc.pressed = function (groupId, attr, value) {
+  document.querySelectorAll('#' + groupId + ' button').forEach(function (b) {
+    var active = b.getAttribute(attr) === value;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+};
+// Change the resource, the grouping or the project filter, then refresh
+// the table and the chart.
+tc.set = function (changes) {
+  ['resource', 'by', 'project', 'range'].forEach(function (name) {
+    if (changes[name] !== undefined) { document.getElementById('tc-' + name).value = changes[name]; }
+  });
+  if (document.getElementById('tc-by').value !== 'instance') { document.getElementById('tc-project').value = ''; }
+  tc.pressed('tc-resource-buttons', 'data-resource', document.getElementById('tc-resource').value);
+  tc.pressed('tc-by-buttons', 'data-by', document.getElementById('tc-by').value);
+  var range = document.getElementById('tc-range').value;
+  tc.pressed('tc-range-buttons', 'data-range', range);
+  document.querySelectorAll('.tc-range-label').forEach(function (el) { el.textContent = range; });
+  htmx.trigger(document.body, 'tc-change');
+};
+tc.text = {
+  notRefreshed: '{% filter escapejs %}{% trans "Could not be refreshed: showing the last data received." %}{% endfilter %}',
+  notLoaded: '{% filter escapejs %}{% trans "Could not be loaded: trying again at the next refresh." %}{% endfilter %}'
+};
+// htmx keeps the old content when a request fails (5xx, network error):
+// say so in the section, until its next successful swap replaces it
+tc.markNotRefreshed = function (target, text) {
+  var note = target.querySelector(':scope > .tc-not-refreshed');
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'text-warning tc-not-refreshed';
+    note.style.margin = '0 0 6px';
+    target.insertBefore(note, target.firstChild);
+  }
+  note.textContent = '';
+  var icon = document.createElement('i');
+  icon.className = 'fa fa-exclamation-triangle';
+  icon.setAttribute('aria-hidden', 'true');
+  note.appendChild(icon);
+  note.appendChild(document.createTextNode(' ' + text));
+};
+['htmx:sendError', 'htmx:responseError'].forEach(function (name) {
+  document.body.addEventListener(name, function (e) {
+    var target = e.detail.target;
+    // expired session: Horizon answers 401 to AJAX requests
+    if (e.detail.xhr && e.detail.xhr.status === 401) { window.location.reload(); return; }
+    if (target && target.closest && target.closest('#tc-root')) {
+      tc.markNotRefreshed(target, target.querySelector('.tc-loading, [data-tc-nodata]') ?
+        tc.text.notLoaded : tc.text.notRefreshed);
+    }
+  });
+});
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') { htmx.trigger(document.body, 'tc-refresh'); }
+});
+// a project name lists that project's instances
+document.addEventListener('click', function (e) {
+  var link = e.target.closest('[data-tc-project]');
+  if (link) {
+    e.preventDefault();
+    tc.set({ by: 'instance', project: link.getAttribute('data-tc-project') });
+    document.getElementById('tc-table').focus();
+  }
+});
+</script>
+
+{% for message in error_messages %}
+<div class="alert alert-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ message }}</div>
+{% endfor %}
+
+<div id="tc-root" hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
+<!-- Shared request parameters for the partials -->
+<form id="tc-controls" onsubmit="return false;">
+  <input type="hidden" name="resource" id="tc-resource" value="{{ default_resource }}">
+  <input type="hidden" name="by" id="tc-by" value="{{ default_by }}">
+  <input type="hidden" name="project" id="tc-project" value="">
+  <input type="hidden" name="range" id="tc-range" value="{{ default_range }}">
+</form>
+
+<div class="row tc-toolbar">
+  <div class="col-sm-10">
+    <div class="btn-group btn-group-sm" role="group" aria-label="{% trans 'Resource' %}" id="tc-resource-buttons">
+      {% for r in resources %}
+      <button type="button" class="btn btn-default{% if r.key == default_resource %} active{% endif %}"
+              data-resource="{{ r.key }}" aria-pressed="{% if r.key == default_resource %}true{% else %}false{% endif %}"
+              onclick="tc.set({resource: '{{ r.key }}'})"><i class="fa {{ r.icon }}" aria-hidden="true"></i> {{ r.label }}</button>
+      {% endfor %}
+    </div>
+    <div class="btn-group btn-group-sm" role="group" aria-label="{% trans 'Group by' %}" id="tc-by-buttons" style="margin-left: 10px;">
+      <button type="button" class="btn btn-default active" data-by="project" aria-pressed="true"
+              onclick="tc.set({by: 'project'})">{% trans "By project" %}</button>
+      <button type="button" class="btn btn-default" data-by="instance" aria-pressed="false"
+              onclick="tc.set({by: 'instance', project: ''})">{% trans "By instance" %}</button>
+    </div>
+    <div class="btn-group btn-group-sm" role="group" aria-label="{% trans 'Time range' %}" id="tc-range-buttons" style="margin-left: 10px;">
+      {% for range in ranges %}
+      <button type="button" class="btn btn-default{% if range == default_range %} active{% endif %}"
+              data-range="{{ range }}" aria-pressed="{% if range == default_range %}true{% else %}false{% endif %}"
+              onclick="tc.set({range: '{{ range }}'})">{{ range }}</button>
+      {% endfor %}
+    </div>
+    <div class="tc-muted" style="margin-top: 4px;">{% blocktrans with window=current_window %}The time range applies to the chart and the CPU sparklines. Current values always use the last {{ window }}.{% endblocktrans %}</div>
+  </div>
+  <div class="col-sm-2 text-right tc-muted" style="line-height: 30px;">
+    <i class="fa fa-refresh" aria-hidden="true"></i>
+    {% blocktrans with seconds=refresh_seconds %}Refreshes every {{ seconds }}s{% endblocktrans %}
+  </div>
+</div>
+
+<!-- 1. Summary cards -->
+<div id="tc-summary" class="tc-section"
+     hx-get="{% url 'horizon:admin:top_consumers:summary' %}"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], tc-refresh from:body, tc-retry"
+     hx-swap="innerHTML">
+  <div class="tc-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+</div>
+
+<!-- 2. Top 10 table (bounded) -->
+<div id="tc-table" class="tc-section" tabindex="-1"
+     hx-get="{% url 'horizon:admin:top_consumers:top' %}"
+     hx-include="#tc-controls"
+     hx-sync="this:replace"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], tc-refresh from:body, tc-retry, tc-change from:body"
+     hx-swap="innerHTML">
+  <div class="panel panel-default"><div class="tc-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+</div>
+
+<!-- 3. Over time: top 5 + Other -->
+<div id="tc-trend" class="tc-section"
+     hx-get="{% url 'horizon:admin:top_consumers:trend' %}"
+     hx-include="#tc-controls"
+     hx-sync="this:replace"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], tc-refresh from:body, tc-retry, tc-change from:body"
+     hx-swap="innerHTML">
+  <div class="panel panel-default"><div class="tc-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+</div>
+
+{% if thresholds %}
+{# A native disclosure: keyboard and screen reader support without script. #}
+<details class="panel panel-default tc-section tc-how" id="tc-how">
+  <summary class="panel-heading"><h3 class="panel-title"><i class="fa fa-sliders" aria-hidden="true"></i> {% trans "How this page is calculated" %} <small class="text-muted">{% trans "(click to expand)" %}</small></h3></summary>
+  <div class="panel-body">
+    <table class="tc-how-table tc-muted">
+      <tr><th scope="col">{% trans "Item" %}</th><th scope="col">{% trans "Source, query or rule" %}</th></tr>
+      <tr><th scope="row">{% trans "CPU" %}</th><td>{% blocktrans with w=current_window %}Cores in use: <code>sum by (project) (rate(ceilometer_cpu{…}[{{ w }}])) / 1e9</code>. Allocated: <code>ceilometer_vcpus</code>, the vCPUs of the running instances.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Memory" %}</th><td>{% blocktrans with w=current_window %}In use: <code>ceilometer_memory_usage</code> (last sample in {{ w }}). Allocated: <code>ceilometer_memory</code>, the flavor RAM.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Disk I/O" %}</th><td>{% blocktrans with w=current_window %}<code>rate(ceilometer_disk_device_read_bytes[{{ w }}])</code> + <code>rate(ceilometer_disk_device_write_bytes[{{ w }}])</code>, every disk of the instance.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Network" %}</th><td>{% blocktrans with w=current_window %}<code>rate(ceilometer_network_incoming_bytes[{{ w }}])</code> + <code>rate(ceilometer_network_outgoing_bytes[{{ w }}])</code>, every interface of the instance.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Polled samples only" %}</th><td>{% blocktrans %}<code>{…}</code> is <code>resource_name=~".+:instance-.+"</code>: Nova notifications publish the same meters with a plain name, and would count instances twice. Each metric is summed per project first, then the metrics are added.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Share of total in use" %}</th><td>{% trans "The row's value divided by the total of the cloud (or of the project whose instances are listed)." %}</td></tr>
+      <tr><th scope="row">{% trans "Used ÷ allocated" %}</th><td>{% blocktrans with busy=thresholds.usage_busy idle=thresholds.usage_idle %}CPU cores in use ÷ vCPUs, or memory in use ÷ flavor RAM. Busy: ≥ {{ busy }}%. Mostly idle: &lt; {{ idle }}%. Allocated counts running instances only: Ceilometer has no hypervisor capacity, so the share is of what is in use, not of the cloud's size (that needs Placement).{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Table" %}</th><td>{% blocktrans with limit=top_limit %}At most {{ limit }} rows. Projects come from one snapshot of every project with running instances; instances from a <code>topk({{ limit }}, …)</code> query, so other instances are never sent to the browser.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Over time chart" %}</th><td>{% blocktrans with n=chart_series steps=range_steps|join:"; " w=current_window %}The top {{ n }} rows of the table, stacked, over the selected range ({{ steps }}; rates are never taken over less than {{ w }}). "Other" is the total minus those rows, so the top edge is the total. The CPU sparklines use the same range.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Project names" %}</th><td>{% blocktrans count minutes=names_minutes %}Identity service (Keystone), project list of all projects, refreshed every {{ minutes }} minute and shared by every administrator of the region: a new or renamed project can show its ID or old name until then. If Keystone fails, the last names received (or the project IDs) are shown and it is asked again at the next refresh of the list.{% plural %}Identity service (Keystone), project list of all projects, refreshed every {{ minutes }} minutes and shared by every administrator of the region: a new or renamed project can show its ID or old name until then. If Keystone fails, the last names received (or the project IDs) are shown and it is asked again at the next refresh of the list.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Instance names" %}</th><td>{% trans "From the resource_name label of the metrics: no Compute API call." %}</td></tr>
+      <tr><th scope="row">{% trans "Source" %}</th><td>{% trans "Ceilometer compute agent (polled instance meters), through sg-core, Prometheus and Aetos." %}</td></tr>
+    </table>
+    <p class="tc-muted" style="margin: 8px 0 0;">{% blocktrans %}The busy and idle thresholds can be overridden in <code>local_settings</code> with <code>GRIAN_PLUGIN['top_consumers_thresholds']</code>.{% endblocktrans %}</p>
+  </div>
+</details>
+{% endif %}
+
+</div>
+
+{% endblock %}

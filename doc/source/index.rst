@@ -19,3 +19,5 @@ documentation for details.
    admin-compute-host-health
    user-compute-host-health
    admin-instance-health
+   admin-top-consumers
+   user-top-consumers
