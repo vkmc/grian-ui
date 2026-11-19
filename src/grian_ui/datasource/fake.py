@@ -414,6 +414,14 @@ class FakeTelemetryClient(DatasourceClient):
         """Get a sample cloud traffic trend."""
         return fake_network.fake_traffic_trend(range_key, at)
 
+    # Provisioning --------------------------------------------------------
+
+    def get_provisioning_boots(self, range_key: str) -> list:
+        """Get sample boots (see grian_ui.datasource.fake_provisioning)."""
+        from grian_ui.datasource import fake_provisioning
+
+        return fake_provisioning.boots_in_range(range_key)
+
 
 def _make_fake_hosts():
     rng = random.Random(42)  # nosec

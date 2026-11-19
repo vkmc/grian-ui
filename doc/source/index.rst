@@ -23,3 +23,5 @@ documentation for details.
    user-top-consumers
    admin-network-health
    user-network-health
+   admin-provisioning
+   user-provisioning
