@@ -61,3 +61,76 @@ class DatasourceClient(ABC):
     def get_capacity_predictions(self) -> list:
         """Get capacity predictions for storage pools."""
         pass
+
+    # Project Compute (see grian_ui.project_compute) -----------------------
+    # ``matcher`` is grian_ui.project.project_matcher(request): every query
+    # is scoped to the current project.
+
+    @abstractmethod
+    def get_project_compute_snapshot(self, matcher: str) -> dict:
+        """
+        Get the current values of the project's running instances.
+
+        Returns:
+            dict: ``{"instances": {uuid: {"name", "vcpus", "memory_alloc",
+            "cpu", "cpu_wait", "memory", "swap", "disks": {device:
+            {"used", "capacity", "write", "latency"}}}}}``
+        """
+        pass
+
+    @abstractmethod
+    def get_project_compute_rightsizing(self, matcher: str) -> dict:
+        """
+        Get the 7-day statistics of the project's instances.
+
+        Returns:
+            dict: ``{"instances": {uuid: {"cpu_avg", "cpu_p95",
+            "memory_avg", "swap", "hours"}}}``
+        """
+        pass
+
+    @abstractmethod
+    def get_project_compute_forecast(self, matcher: str, days: int) -> dict:
+        """
+        Get the growth of what running instances hold over ``days``.
+
+        Returns:
+            dict: ``{"slopes": {quota: per second}, "hours", "days"}``
+        """
+        pass
+
+    @abstractmethod
+    def get_project_compute_trend(
+        self, matcher: str, resource: str, range_key: str, at: float = None
+    ) -> dict:
+        """
+        Get what running instances held of a quota over a chart range.
+
+        Returns:
+            dict: ``{"points": [[ts, value], ...]}``
+        """
+        pass
+
+    @abstractmethod
+    def get_project_compute_cpu_series(
+        self, matcher: str, instance_ids: list, at: float = None
+    ) -> dict:
+        """
+        Get the 7-day CPU use (cores) of some instances.
+
+        Returns:
+            dict: ``{"series": {uuid: [[ts, cores], ...]}}``
+        """
+        pass
+
+    @abstractmethod
+    def get_project_compute_instance_trend(
+        self, matcher: str, instance_id: str, at: float = None
+    ) -> dict:
+        """
+        Get the 7-day CPU (cores) and memory (MiB) of one instance.
+
+        Returns:
+            dict: ``{"cpu": [[ts, v], ...], "memory": [[ts, v], ...]}``
+        """
+        pass

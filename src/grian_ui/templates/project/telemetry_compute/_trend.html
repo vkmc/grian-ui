@@ -1,0 +1,42 @@
+{% load i18n %}
+{% if error_message %}
+<div data-pc-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {% if loading %}{{ error_message }}{% else %}{% trans "Trend unavailable: no metrics." %} {{ error_message }}{% endif %}</div>
+{% include "project/telemetry_compute/_retry.html" %}
+<script>pc.destroyChart('trend');</script>
+{% elif not has_data and chart.quota_now is None %}
+<p class="text-muted text-center" style="padding: 20px; margin: 0;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with range=trend_range %}No running instance reported in the last {{ range }}.{% endblocktrans %}</p>
+<script>pc.destroyChart('trend');</script>
+{% else %}
+<div class="pc-legend pc-muted">
+  <span><span class="pc-ln" style="border-color: #337ab7;" aria-hidden="true"></span>{% blocktrans with r=resource_label %}{{ r }} of running instances (metrics){% endblocktrans %}</span>
+  {% if chart.quota_now is not None %}<span><span class="pc-ln pc-dash" style="border-color: #d9534f;" aria-hidden="true"></span>{% trans "Counted by the quota now (Compute API)" %}</span>{% endif %}
+  {% if chart.limit is not None %}<span><span class="pc-ln pc-dash" style="border-color: #767676;" aria-hidden="true"></span>{% trans "Quota limit" %}</span>{% endif %}
+</div>
+<div class="pc-chart"><canvas id="pc-trend-canvas-{{ uid }}" role="img" aria-label="{% blocktrans with r=resource_label range=trend_range %}{{ r }} held by running instances over the last {{ range }}{% endblocktrans %}" aria-describedby="pc-trend-summary-{{ uid }}"></canvas></div>
+<p class="sr-only" id="pc-trend-summary-{{ uid }}">{% if summary %}{% blocktrans with latest=summary.latest min=summary.min max=summary.max %}Running instances: latest {{ latest }}, lowest {{ min }}, highest {{ max }}.{% endblocktrans %}{% endif %}</p>
+{% with data_id="pc-trend-data-"|add:uid %}{{ chart|json_script:data_id }}{% endwith %}
+<p class="pc-muted" style="margin: 8px 0 0;">
+  {% if gap %}<i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with q=gap.quota r=gap.running g=gap.gap %}The quota counts <strong>{{ q }}</strong>, but running instances hold <strong>{{ r }}</strong>. The difference ({{ g }}) is held by instances that aren't running; see <em>Holding quota without running</em>.{% endblocktrans %}{% endif %}
+  {% if not has_data %}<i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with range=trend_range %}No running instance reported in the last {{ range }}.{% endblocktrans %}{% endif %}
+  {% if data_since_ts %}{% blocktrans %}No data before <span class="pc-clock" data-ts="{{ data_since_ts }}"></span>: nothing ran, or the metrics did not exist yet.{% endblocktrans %}{% endif %}
+  {% if nova_unavailable %}<span class="text-warning"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% if loading %}{% trans "Loading the quota from the Compute API…" %}{% else %}{% trans "The quota could not be read from the Compute API." %}{% endif %}</span>{% endif %}
+  {% if data_stale %}<span class="text-warning"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</span>{% endif %}
+</p>
+{% if loading %}{% include "project/telemetry_compute/_retry.html" %}{% endif %}
+<script>
+(function () {
+  var d = pc.readJson('pc-trend-data-{{ uid }}');
+  pc.showClocks(document.getElementById('pc-trend'));
+  var n = d.timestamps.length;
+  var format = function (v) { return pc.formatQuota(v, d.resource); };
+  var datasets = [{ label: '{% filter escapejs %}{% blocktrans with r=resource_label %}{{ r }}, running instances{% endblocktrans %}{% endfilter %}',
+    data: d.values, borderColor: pc.colors.blue, backgroundColor: pc.colors.blueFill, fill: 'origin',
+    borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: .25 }];
+  if (d.quota_now !== null) { datasets.push(pc.refLine('{% filter escapejs %}{% trans "Counted by the quota now" %}{% endfilter %}', d.quota_now, n, pc.colors.crit)); }
+  if (d.limit !== null) { datasets.push(pc.refLine('{% filter escapejs %}{% trans "Quota limit" %}{% endfilter %}', d.limit, n)); }
+  var max = d.limit !== null ? d.limit * 1.1 : undefined;
+  pc.lineChart('trend', document.getElementById('pc-trend-canvas-{{ uid }}'),
+    d.timestamps.map(function (t) { return pc.formatTime(t, d.range); }), datasets, format, max);
+})();
+</script>
+{% endif %}

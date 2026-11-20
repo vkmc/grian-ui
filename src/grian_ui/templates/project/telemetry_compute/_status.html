@@ -1,0 +1,1 @@
+{# Nova status with a colour swatch (the text carries the meaning). #}<span class="pc-sw" style="background: {% if status == 'ACTIVE' %}#5cb85c{% elif status == 'ERROR' %}#d9534f{% else %}#999{% endif %};" aria-hidden="true"></span>{{ status|default:"–" }}

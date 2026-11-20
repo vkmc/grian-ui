@@ -352,6 +352,50 @@ class PrometheusTelemetryClient(DatasourceClient):
             series.append((result.get("metric", {}), points))
         return series
 
+    # Project Compute (queries in prometheus_project_compute) -------------
+
+    def get_project_compute_snapshot(self, matcher: str) -> dict:
+        from grian_ui.datasource import prometheus_project_compute
+
+        return prometheus_project_compute.get_snapshot(self, matcher)
+
+    def get_project_compute_rightsizing(self, matcher: str) -> dict:
+        from grian_ui.datasource import prometheus_project_compute
+
+        return prometheus_project_compute.get_rightsizing(self, matcher)
+
+    def get_project_compute_forecast(self, matcher: str, days: int) -> dict:
+        from grian_ui.datasource import prometheus_project_compute
+
+        return prometheus_project_compute.get_forecast(self, matcher, days)
+
+    def get_project_compute_trend(
+        self, matcher: str, resource: str, range_key: str, at: float = None
+    ) -> dict:
+        from grian_ui.datasource import prometheus_project_compute
+
+        return prometheus_project_compute.get_trend(
+            self, matcher, resource, range_key, at=at
+        )
+
+    def get_project_compute_cpu_series(
+        self, matcher: str, instance_ids: list, at: float = None
+    ) -> dict:
+        from grian_ui.datasource import prometheus_project_compute
+
+        return prometheus_project_compute.get_cpu_series(
+            self, matcher, instance_ids, at=at
+        )
+
+    def get_project_compute_instance_trend(
+        self, matcher: str, instance_id: str, at: float = None
+    ) -> dict:
+        from grian_ui.datasource import prometheus_project_compute
+
+        return prometheus_project_compute.get_instance_trend(
+            self, matcher, instance_id, at=at
+        )
+
 
 def get_client(request) -> DatasourceClient:
     """

@@ -1,0 +1,34 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-pause-circle" aria-hidden="true"></i> {% trans "Holding quota without running" %}
+    <span class="pc-bounded">{% blocktrans with n=idle_limit %}max {{ n }} rows{% endblocktrans %}</span></h3></div>
+  {% if error_message %}
+  <div class="panel-body"><div data-pc-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+  {% include "project/telemetry_compute/_retry.html" %}</div>
+  {% elif not rows %}
+  <div class="panel-body pc-empty"><i class="fa fa-check-circle text-success" aria-hidden="true"></i>{% trans "Every instance that holds quota is running." %}</div>
+  {% else %}
+  <div class="table-responsive">
+    <table class="table pc-table" style="margin-bottom: 0;">
+      <thead><tr><th>{% trans "Instance" %}</th><th>{% trans "Status" %}</th><th class="text-right">{% trans "Holds" %}</th><th><span class="sr-only">{% trans "Actions" %}</span></th></tr></thead>
+      <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{% if row.metrics_url %}<a class="pc-link" href="{{ row.metrics_url }}" title="{% trans 'Metrics of this instance' %}">{{ row.name }}</a>{% else %}<strong title="{{ row.id }}">{{ row.name }}</strong>{% endif %}<br>
+          <small class="text-muted">{{ row.flavor|default:_("unknown flavor") }}{% if row.since %} | {% blocktrans with d=row.since %}for {{ d }}{% endblocktrans %}{% endif %}</small></td>
+        <td>{% include "project/telemetry_compute/_status.html" with status=row.status %}{% if row.fault %}<br><small class="text-muted">{{ row.fault }}</small>{% endif %}</td>
+        <td class="text-right">{% if row.vcpus is not None %}{% blocktrans with n=row.vcpus %}{{ n }} vCPU{% endblocktrans %}{% else %}–{% endif %}<br>{{ row.ram_text }}{% if row.ram_percent is not None %} <small class="text-muted">{% blocktrans with p=row.ram_percent|floatformat:0 %}({{ p }}% of RAM quota){% endblocktrans %}</small>{% endif %}</td>
+        <td class="text-right">{% if row.instance_url %}<a class="btn btn-xs btn-default" href="{{ row.instance_url }}" title="{% trans 'Opens the instance in Project > Compute > Instances' %}">{% if row.status == "ERROR" %}{% trans "Delete…" %}{% else %}{% trans "Manage…" %}{% endif %}</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="panel-footer pc-muted">
+    {% if more %}<p style="margin: 0 0 4px;">{% blocktrans count n=more %}{{ n }} more instance not shown.{% plural %}{{ n }} more instances not shown.{% endblocktrans %}</p>{% endif %}
+    {% if data_stale %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>
+    {% elif data_old %}<p style="margin: 0 0 4px;"><i class="fa fa-refresh" aria-hidden="true"></i> {% trans "Refreshing: the data shown may be out of date." %}</p>{% endif %}
+    <i class="fa fa-info-circle" aria-hidden="true"></i> {% trans "These count against your quota but do no work. Deleting them frees the quota; shelving them frees the hosts but, on most clouds, not the quota." %}
+  </div>
+  {% endif %}
+</div>

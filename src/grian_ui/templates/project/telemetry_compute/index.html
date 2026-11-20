@@ -1,0 +1,421 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load static %}
+{% block title %}{% trans "Compute" %}{% endblock %}
+
+{% block page_header %}
+  {% include "horizon/common/_page_header.html" with title=_("Compute") %}
+{% endblock page_header %}
+
+{% block main %}
+<!-- HTMX -->
+<script src="{% static 'vendor/htmx.js' %}"></script>
+<!-- Chart.js -->
+<script src="{% static 'vendor/chart.umd.js' %}"></script>
+
+<style>
+.pc-section { margin-bottom: 20px; }
+.pc-toolbar { margin-bottom: 15px; }
+.pc-muted { color: #595959; font-size: 12px; }
+.pc-loading { padding: 25px; text-align: center; color: #666; }
+.pc-card { border: 0; color: #fff; }
+.pc-card .panel-heading { display: flex; align-items: center; min-height: 110px; padding: 18px 15px; color: #fff; border: 0; border-radius: 3px; }
+.pc-card .pc-icon { font-size: 3em; opacity: .3; margin-right: 15px; }
+.pc-card .pc-value { font-size: 2.3em; font-weight: 300; line-height: 1; margin-bottom: 4px; }
+.pc-card .pc-value small { font-size: .45em; color: #fff; }
+.pc-card .pc-label { font-size: .95em; }
+.pc-card .pc-sub { font-size: .85em; margin-top: 3px; }
+/* card colours: white text needs at least 3:1 on large text, 4.5:1 on the rest */
+.pc-card-ok .panel-heading { background: #3d7d3d; }
+.pc-card-warning .panel-heading { background: #a35f00; }
+.pc-card-critical .panel-heading { background: #b52b27; }
+.pc-card-info .panel-heading { background: #2a6496; }
+.pc-card-unknown .panel-heading { background: #666; }
+/* summary cards: the same height in a row */
+#pc-root .pc-cards { display: flex; flex-wrap: wrap; }
+#pc-root .pc-cards::before, #pc-root .pc-cards::after { display: none; }
+#pc-root .pc-cards > [class*="col-"] { display: flex; }
+#pc-root .pc-cards .pc-card { flex: 1; display: flex; flex-direction: column; }
+#pc-root .pc-cards .pc-card .panel-heading { flex: 1; }
+/* pressed buttons: the theme's #e6e6e6 is 1.3:1 and equals the hover */
+#pc-root .btn-group .btn.active { background-color: #1a4f80; border-color: #1a4f80; color: #fff; font-weight: 600; }
+#pc-root .btn .badge { font-size: 10px; font-weight: 600; padding: 2px 5px; margin-left: 2px; background: #666; }
+#pc-root .btn.active .badge { background: #fff; color: #1a4f80; }
+/* the default theme's .text-muted (#bbb) is 1.9:1 on white */
+#pc-root .text-muted { color: #595959; }
+#pc-root .text-warning { color: #6b4f1d; }
+#pc-root a.pc-link { color: #1a4f80; font-weight: 600; }
+.pc-bounded { font-size: 11px; color: #2b5a2b; background: #dff0d8; border-radius: 3px; padding: 1px 5px; margin-left: 6px; font-weight: normal; }
+.pc-src { font-size: 11px; color: #444; background: #eee; border-radius: 3px; padding: 1px 5px; margin-left: 6px; font-weight: normal; }
+.pc-table td, .pc-table th { vertical-align: middle !important; }
+.pc-table tr.pc-row-main { cursor: pointer; }
+.pc-table tr.pc-detail > td { background: #fafafa; border-top: 0; }
+.pc-caret { width: 18px; color: #666; }
+/* quota rows: one stacked bar per quota, segments separated by a 2px gap */
+.pc-quota-row { display: flex; align-items: center; margin: 9px 0; }
+.pc-quota-row .pc-q-name { width: 120px; font-weight: 600; }
+.pc-quota-row .pc-q-bar { flex: 1; display: flex; height: 18px; background: #eee; border-radius: 4px; overflow: hidden; gap: 2px; }
+.pc-quota-row .pc-q-bar .pc-seg { height: 100%; min-width: 2px; }
+.pc-quota-row .pc-q-val { width: 190px; text-align: right; padding-left: 10px; white-space: nowrap; }
+.pc-quota-row .pc-q-fc { width: 210px; padding-left: 12px; font-size: 12px; white-space: nowrap; }
+.pc-seg-running { background: #337ab7; }
+.pc-seg-stopped { background: #999; }
+.pc-seg-error { background: repeating-linear-gradient(135deg, #d9534f 0 5px, #b52b27 5px 10px); }
+.pc-q-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 6px 0 0 120px; }
+.pc-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+/* used ÷ allocated bars */
+.pc-ratio { display: inline-block; width: 90px; height: 8px; background: #eee; border-radius: 4px; overflow: hidden; vertical-align: middle; margin-right: 6px; }
+.pc-ratio > span { display: block; height: 100%; border-radius: 0 4px 4px 0; background: #337ab7; }
+.pc-ratio.pc-busy > span { background: #b52b27; }
+.pc-ratio.pc-low > span { background: #9bbbd9; }
+.pc-tag { display: inline-block; box-sizing: border-box; height: 20px; line-height: 18px; margin: 1px 4px 1px 0; padding: 0 6px; border-radius: 3px; font-size: 11px; border: 1px solid; white-space: nowrap; vertical-align: middle; }
+.pc-tag-crit { border-color: #d9534f; color: #8b2724; background: #f9e5e4; }
+.pc-tag-warn { border-color: #f0ad4e; color: #6b4f1d; background: #fcf3e3; }
+.pc-tag-ok { border-color: #5cb85c; color: #2b5a2b; background: #e6f4e6; }
+.pc-tag-blue { border-color: #337ab7; color: #1a4f80; background: #e8f1fa; }
+.pc-tag-info { border-color: #bbb; color: #444; background: #f3f3f3; }
+.pc-spark { width: 110px; height: 28px; }
+.pc-chart { position: relative; height: 240px; }
+.pc-chart-sm { position: relative; height: 160px; }
+.pc-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; margin-bottom: 4px; }
+.pc-legend .pc-ln { display: inline-block; width: 16px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
+.pc-legend .pc-ln.pc-dash { border-top-style: dashed; }
+.pc-empty { padding: 30px 20px; text-align: center; color: #595959; }
+.pc-empty .fa { font-size: 3em; opacity: .4; display: block; margin-bottom: 10px; }
+.pc-advice { font-size: 12px; color: #333; max-width: 420px; }
+/* how this page is calculated */
+.pc-how > summary { cursor: pointer; }
+.pc-how > summary .panel-title { display: inline; }
+.pc-how-table th, .pc-how-table td { padding: 3px 12px 3px 0; vertical-align: top; }
+.pc-how-table th[scope="row"] { white-space: nowrap; }
+</style>
+
+<script>
+window.pc = window.pc || {};
+pc.charts = pc.charts || {};
+pc.sparks = pc.sparks || [];
+pc.open = pc.open || new Set();
+// Series colours of the mockups (Bootstrap primary; status colours always
+// come with an icon or a text).
+pc.colors = { blue: '#337ab7', blueFill: 'rgba(51,122,183,.12)', crit: '#d9534f', grey: '#767676', light: '#9bbbd9' };
+pc.readJson = function (id) {
+  var el = document.getElementById(id);
+  return el ? JSON.parse(el.textContent) : null;
+};
+pc.trimmed = function (v, digits) { return +v.toFixed(digits); };
+pc.formatMib = function (v) {
+  if (v === null || v === undefined) { return '–'; }
+  var units = ['MiB', 'GiB', 'TiB'], i = 0;
+  while (Math.abs(v) >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return pc.trimmed(v, Math.abs(v) >= 100 ? 0 : 1) + ' ' + units[i];
+};
+pc.formatQuota = function (v, resource) {
+  if (v === null || v === undefined) { return '–'; }
+  if (resource === 'ram') { return pc.formatMib(v); }
+  return String(pc.trimmed(v, 1));
+};
+pc.formatCores = function (v) {
+  if (v === null || v === undefined) { return '–'; }
+  return String(pc.trimmed(v, v < 10 ? 2 : 1));
+};
+// Browser-local times: the server only sends epoch seconds.
+pc.formatTime = function (ts, range) {
+  var d = new Date(ts * 1000);
+  if (range === '7d' || range === '30d') {
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+pc.formatClock = function (ts) {
+  var d = new Date(ts * 1000);
+  var time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  if (d.toDateString() === new Date().toDateString()) { return time; }
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time;
+};
+pc.showClocks = function (root) {
+  root.querySelectorAll('.pc-clock').forEach(function (el) {
+    el.textContent = pc.formatClock(parseInt(el.getAttribute('data-ts'), 10));
+  });
+};
+pc.replaceChart = function (key, canvas, config) {
+  if (pc.charts[key]) { pc.charts[key].destroy(); }
+  pc.charts[key] = canvas ? new Chart(canvas, config) : null;
+};
+pc.destroyChart = function (key) {
+  if (pc.charts[key]) { pc.charts[key].destroy(); pc.charts[key] = null; }
+};
+pc.destroyCharts = function (prefix) {
+  Object.keys(pc.charts).forEach(function (key) {
+    if (key.indexOf(prefix) === 0) { pc.destroyChart(key); }
+  });
+};
+pc.refLine = function (label, value, n, color) {
+  return { label: label, data: new Array(n).fill(value), borderColor: color || pc.colors.grey, borderDash: [5, 4],
+    borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, fill: false };
+};
+pc.lineChart = function (key, canvas, labels, datasets, format, max) {
+  pc.replaceChart(key, canvas, {
+    type: 'line',
+    data: { labels: labels, datasets: datasets },
+    options: {
+      maintainAspectRatio: false, animation: false, spanGaps: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + format(c.parsed.y); } } } },
+      scales: { y: { min: 0, suggestedMax: max, ticks: { maxTicksLimit: 5, callback: function (v) { return format(v); } } },
+        x: { ticks: { maxTicksLimit: 6, autoSkip: true } } }
+    }
+  });
+};
+pc.pressed = function (groupId, attr, value) {
+  document.querySelectorAll('#' + groupId + ' button').forEach(function (b) {
+    var active = b.getAttribute(attr) === value;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+};
+// Change the chart range or resource, or the rightsizing group, then
+// refresh the sections that use it.
+pc.set = function (changes) {
+  if (changes.range !== undefined) {
+    document.getElementById('pc-range').value = changes.range;
+    pc.pressed('pc-range-buttons', 'data-range', changes.range);
+  }
+  if (changes.resource !== undefined) { document.getElementById('pc-resource').value = changes.resource; }
+  if (changes.range !== undefined || changes.resource !== undefined) { htmx.trigger(document.body, 'pc-trend-change'); }
+  if (changes.group !== undefined) {
+    document.getElementById('pc-group').value = changes.group;
+    htmx.trigger(document.body, 'pc-group-change');
+  }
+};
+// Rightsizing rows open a detail row (charts against the flavor); the open
+// rows stay open across refreshes.
+pc.detailUrl = '{% url "horizon:project:telemetry_compute:instance" %}';
+pc.openRow = function (row) {
+  var id = row.getAttribute('data-pc-instance');
+  var detail = document.createElement('tr');
+  detail.className = 'pc-detail';
+  detail.setAttribute('data-pc-detail', id);
+  var spacer = document.createElement('td');
+  var cell = document.createElement('td');
+  cell.colSpan = row.children.length - 1;
+  var box = document.createElement('div');
+  box.setAttribute('hx-get', pc.detailUrl + '?instance=' + encodeURIComponent(id));
+  box.setAttribute('hx-trigger', 'load');
+  // built as DOM nodes: escapejs does not make text safe as HTML
+  var loading = document.createElement('div');
+  loading.className = 'pc-loading';
+  var spinner = document.createElement('i');
+  spinner.className = 'fa fa-spinner fa-spin';
+  spinner.setAttribute('aria-hidden', 'true');
+  loading.appendChild(spinner);
+  loading.appendChild(document.createTextNode(' ' + pc.text.loading));
+  box.appendChild(loading);
+  cell.appendChild(box);
+  detail.appendChild(spacer);
+  detail.appendChild(cell);
+  row.parentNode.insertBefore(detail, row.nextSibling);
+  row.setAttribute('aria-expanded', 'true');
+  var caret = row.querySelector('.pc-caret .fa');
+  if (caret) { caret.className = 'fa fa-caret-down'; }
+  htmx.process(box);
+};
+pc.toggle = function (row) {
+  var id = row.getAttribute('data-pc-instance');
+  var next = row.nextElementSibling;
+  if (next && next.getAttribute('data-pc-detail') === id) {
+    next.parentNode.removeChild(next);
+    pc.destroyCharts('detail-' + id + '-');
+    pc.open.delete(id);
+    row.setAttribute('aria-expanded', 'false');
+    var caret = row.querySelector('.pc-caret .fa');
+    if (caret) { caret.className = 'fa fa-caret-right'; }
+    return;
+  }
+  pc.open.add(id);
+  pc.openRow(row);
+};
+pc.reopen = function (root) {
+  root.querySelectorAll('tr.pc-row-main[data-pc-instance]').forEach(function (row) {
+    if (pc.open.has(row.getAttribute('data-pc-instance'))) { pc.openRow(row); }
+  });
+};
+document.addEventListener('click', function (e) {
+  if (e.target.closest('a, button')) { return; }
+  var row = e.target.closest('#pc-rightsizing tr.pc-row-main');
+  if (row) { pc.toggle(row); }
+});
+document.addEventListener('keydown', function (e) {
+  var row = e.target.closest && e.target.closest('#pc-rightsizing tr.pc-row-main');
+  if (row && e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pc.toggle(row); }
+});
+pc.text = {
+  loading: '{% filter escapejs %}{% trans "Loading…" %}{% endfilter %}',
+  notRefreshed: '{% filter escapejs %}{% trans "Could not be refreshed: showing the last data received." %}{% endfilter %}',
+  notLoaded: '{% filter escapejs %}{% trans "Could not be loaded: trying again at the next refresh." %}{% endfilter %}'
+};
+// htmx keeps the old content when a request fails (5xx, network error):
+// say so in the section, until its next successful swap replaces it
+pc.markNotRefreshed = function (target, text) {
+  var note = target.querySelector(':scope > .pc-not-refreshed');
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'text-warning pc-not-refreshed';
+    note.style.margin = '0 0 6px';
+    target.insertBefore(note, target.firstChild);
+  }
+  note.textContent = '';
+  var icon = document.createElement('i');
+  icon.className = 'fa fa-exclamation-triangle';
+  icon.setAttribute('aria-hidden', 'true');
+  note.appendChild(icon);
+  note.appendChild(document.createTextNode(' ' + text));
+};
+['htmx:sendError', 'htmx:responseError'].forEach(function (name) {
+  document.body.addEventListener(name, function (e) {
+    var target = e.detail.target;
+    // expired session: Horizon answers 401 to AJAX requests
+    if (e.detail.xhr && e.detail.xhr.status === 401) { window.location.reload(); return; }
+    if (target && target.closest && target.closest('#pc-root')) {
+      pc.markNotRefreshed(target, target.querySelector('.pc-loading, [data-pc-nodata]') ?
+        pc.text.notLoaded : pc.text.notRefreshed);
+    }
+  });
+});
+document.body.addEventListener('htmx:afterSwap', function (e) {
+  if (e.detail.target && e.detail.target.id === 'pc-rightsizing') { pc.reopen(e.detail.target); }
+});
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') { htmx.trigger(document.body, 'pc-refresh'); }
+});
+</script>
+
+{% for message in error_messages %}
+<div class="alert alert-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ message }}</div>
+{% endfor %}
+
+<div id="pc-root" hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
+<!-- Shared request parameters for the partials -->
+<form id="pc-controls" onsubmit="return false;">
+  <input type="hidden" name="range" id="pc-range" value="{{ default_range }}">
+  <input type="hidden" name="resource" id="pc-resource" value="{{ default_resource }}">
+</form>
+<form id="pc-rs-controls" onsubmit="return false;">
+  <input type="hidden" name="group" id="pc-group" value="">
+</form>
+
+<p class="pc-muted">{% if project_name %}{% blocktrans with project=project_name %}Your compute quota, what uses it, and the health and sizing of your instances, in project {{ project }}.{% endblocktrans %}{% else %}{% trans "Your compute quota, what uses it, and the health and sizing of your instances." %}{% endif %}</p>
+
+<div class="row pc-toolbar">
+  <div class="col-sm-8">
+    <div class="btn-group btn-group-sm" role="group" aria-label="{% trans 'Time range of the chart' %}" id="pc-range-buttons">
+      {% for r in ranges %}
+      <button type="button" class="btn btn-default{% if r.key == default_range %} active{% endif %}"
+              data-range="{{ r.key }}" aria-pressed="{% if r.key == default_range %}true{% else %}false{% endif %}"
+              {% if r.enabled %}onclick="pc.set({range: '{{ r.key }}'})"{% else %}disabled title="{% blocktrans count days=retention_days %}Metrics are kept for {{ days }} day{% plural %}Metrics are kept for {{ days }} days{% endblocktrans %}"{% endif %}>{{ r.key }}</button>
+      {% endfor %}
+    </div>
+    <span class="pc-muted" style="margin-left: 8px;">{% blocktrans with days=min_history_days %}Range for the chart. Rightsizing always looks at the last {{ days }} days.{% endblocktrans %}</span>
+  </div>
+  <div class="col-sm-4 text-right pc-muted" style="line-height: 30px;">
+    <i class="fa fa-refresh" aria-hidden="true"></i>
+    {% blocktrans with seconds=refresh_seconds %}Refreshes every {{ seconds }}s{% endblocktrans %}
+  </div>
+</div>
+
+<!-- 1. Summary cards, telemetry and history notices -->
+<div id="pc-summary" class="pc-section"
+     hx-get="{% url 'horizon:project:telemetry_compute:summary' %}"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pc-refresh from:body, pc-retry"
+     hx-swap="innerHTML">
+  <div class="pc-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+</div>
+
+<!-- 2. Compute quota (Compute API) with the forecast -->
+<div id="pc-quota" class="pc-section"
+     hx-get="{% url 'horizon:project:telemetry_compute:quota' %}"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pc-refresh from:body, pc-retry"
+     hx-swap="innerHTML">
+  <div class="panel panel-default"><div class="pc-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+</div>
+
+<div class="row">
+  <!-- 3. Quota usage over time -->
+  <div class="col-md-7">
+    <div class="panel panel-default pc-section">
+      <div class="panel-heading">
+        <h3 class="panel-title" style="display: inline-block;"><i class="fa fa-line-chart" aria-hidden="true"></i> {% trans "Quota usage over time" %}</h3>
+        <div class="btn-group btn-group-xs pull-right" role="group" aria-label="{% trans 'Quota shown in the chart' %}" id="pc-resource-buttons">
+          {% for r in trend_resources %}
+          <button type="button" class="btn btn-default{% if r.key == default_resource %} active{% endif %}"
+                  data-resource="{{ r.key }}" aria-pressed="{% if r.key == default_resource %}true{% else %}false{% endif %}"
+                  onclick="pc.pressed('pc-resource-buttons', 'data-resource', '{{ r.key }}'); pc.set({resource: '{{ r.key }}'})">{{ r.label }}</button>
+          {% endfor %}
+        </div>
+        <div class="clearfix"></div>
+      </div>
+      <div class="panel-body" id="pc-trend"
+           hx-get="{% url 'horizon:project:telemetry_compute:trend' %}"
+           hx-include="#pc-controls"
+           hx-sync="this:replace"
+           hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pc-refresh from:body, pc-retry, pc-trend-change from:body"
+           hx-swap="innerHTML">
+        <div class="pc-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+      </div>
+    </div>
+  </div>
+  <!-- 4. Holding quota without running (Compute API) -->
+  <div class="col-md-5">
+    <div id="pc-idle" class="pc-section"
+         hx-get="{% url 'horizon:project:telemetry_compute:idle' %}"
+         hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pc-refresh from:body, pc-retry"
+         hx-swap="innerHTML">
+      <div class="panel panel-default"><div class="pc-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 5. Allocated vs used (rightsizing) -->
+<div id="pc-rightsizing" class="pc-section"
+     hx-get="{% url 'horizon:project:telemetry_compute:rightsizing' %}"
+     hx-include="#pc-rs-controls"
+     hx-sync="this:replace"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pc-refresh from:body, pc-retry, pc-group-change from:body"
+     hx-swap="innerHTML">
+  <div class="panel panel-default"><div class="pc-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+</div>
+
+<!-- 6. Instances needing attention -->
+<div id="pc-attention" class="pc-section"
+     hx-get="{% url 'horizon:project:telemetry_compute:attention' %}"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pc-refresh from:body, pc-retry"
+     hx-swap="innerHTML">
+  <div class="panel panel-default"><div class="pc-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+</div>
+
+{% if thresholds and rs_thresholds %}
+{# A native disclosure: keyboard and screen reader support without script. #}
+<details class="panel panel-default pc-section pc-how" id="pc-how">
+  <summary class="panel-heading"><h3 class="panel-title"><i class="fa fa-sliders" aria-hidden="true"></i> {% trans "How this page is calculated" %} <small class="text-muted">{% trans "(click to expand)" %}</small></h3></summary>
+  <div class="panel-body">
+    <table class="pc-how-table pc-muted">
+      <tr><th scope="col">{% trans "Item" %}</th><th scope="col">{% trans "Source or query" %}</th><th scope="col">{% trans "Rule" %}</th></tr>
+      <tr><th scope="row">{% trans "Quota rows" %}</th><td>{% trans "Compute API: absolute limits (as Project > Overview) and the server list, with your token." %}</td><td>{% blocktrans with w=thresholds.quota_warning c=thresholds.quota_critical %}Warning ≥ {{ w }}%, critical ≥ {{ c }}%. Shut-off, paused, suspended and shelved instances are grey; errored ones red.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Forecast" %}</th><td>{% blocktrans with days=forecast_days %}<code>deriv(sum(ceilometer_vcpus{…})[{{ days }}d:1h])</code> (likewise <code>ceilometer_memory</code> and the instance count): the growth of what running instances hold over the last {{ days }} days, the slope <code>predict_linear</code> uses.{% endblocktrans %}</td><td>{% blocktrans with days=min_history_days r=retention_days c=forecast_critical_days w=forecast_warning_days %}(Limit − used now) ÷ growth. Needs {{ days }} days of history (metrics are kept {{ r }} days). Red up to {{ c }} days, yellow up to {{ w }}.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Quota usage over time" %}</th><td>{% blocktrans with w=current_window %}<code>sum(last_over_time(ceilometer_vcpus{…}[{{ w }}]))</code>, <code>ceilometer_memory</code>, or the count of instances.{% endblocktrans %}</td><td>{% trans "Running instances only: the gap to the quota is held by instances that are not running." %}</td></tr>
+      <tr><th scope="row">{% trans "CPU used ÷ vCPUs" %}</th><td>{% blocktrans with w=current_window %}<code>rate(ceilometer_cpu{…}[{{ w }}]) / 1e9</code> every {{ w }} over 7 days, ÷ the flavor vCPUs.{% endblocktrans %}</td><td>{% blocktrans with h=rs_thresholds.cpu_high l=rs_thresholds.cpu_low %}High: 7-day average ≥ {{ h }}%. Low: 7-day 95th percentile &lt; {{ l }}%.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Memory used ÷ flavor RAM" %}</th><td>{% trans "7-day average of <code>ceilometer_memory_usage</code> ÷ the flavor RAM; swap from <code>ceilometer_memory_swap_in</code> and <code>_out</code>." %}</td><td>{% blocktrans with h=rs_thresholds.memory_high l=rs_thresholds.memory_low %}High: ≥ {{ h }}% or any swap in 7 days. Low: &lt; {{ l }}%.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Assessment" %}</th><td>{% trans "CPU and memory together." %}</td><td>{% blocktrans with days=min_history_days %}Any high: <em>Undersized</em>. Both low: <em>Oversized</em>. Otherwise <em>Right-sized</em>. Under {{ days }} days of data: <em>provisional</em>.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Symptoms" %}</th><td>{% blocktrans with w=current_window_text %}As in the admin Instance Health panel, over the last {{ w }}: <code>ceilometer_cpu_delay</code> per vCPU, swap, write latency per request.{% endblocktrans %}</td><td>{% blocktrans with cw=thresholds.cpu_wait_warning cc=thresholds.cpu_wait_critical sw=thresholds.swap_warning lw=thresholds.disk_latency_warning lc=thresholds.disk_latency_critical floor=thresholds.disk_write_floor %}CPU wait ≥ {{ cw }}% / ≥ {{ cc }}%, swap &gt; {{ sw }} MiB/s, disk latency ≥ {{ lw }} / {{ lc }} ms on disks writing at least {{ floor }} MiB/s.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Polled samples only" %}</th><td colspan="2">{% blocktrans %}<code>{…}</code> is <code>resource_name=~".+:instance-.+",project="&lt;this project&gt;"</code>: Nova notifications publish the same meters with a plain name, and would count instances twice.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Refresh" %}</th><td colspan="2">{% blocktrans with s=refresh_seconds %}Compute API and current values every {{ s }} seconds, shared by every member of the project; 7-day statistics every 10 minutes, the forecast every 30 minutes.{% endblocktrans %}</td></tr>
+    </table>
+    <p class="pc-muted" style="margin: 8px 0 0;">{% blocktrans %}Thresholds can be changed by the operator in <code>local_settings</code>: <code>GRIAN_PLUGIN['project_compute_thresholds']</code> and <code>GRIAN_PLUGIN['project_rightsizing_thresholds']</code>.{% endblocktrans %}</p>
+  </div>
+</details>
+{% endif %}
+
+</div>
+
+{% endblock %}

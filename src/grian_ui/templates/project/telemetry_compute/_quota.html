@@ -1,0 +1,46 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-pie-chart" aria-hidden="true"></i> {% trans "Compute quota" %}
+    <span class="pc-src" title="{% trans 'Limits and counts come from the Compute API, like Project > Overview' %}">{% trans "Compute API" %}</span>
+    <span class="pc-bounded">{% trans "3 rows" %}</span></h3></div>
+  <div class="panel-body">
+  {% if error_message %}
+  <div data-pc-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+  {% include "project/telemetry_compute/_retry.html" %}
+  {% else %}
+  {% for row in rows %}
+  <div class="pc-quota-row">
+    <div class="pc-q-name">{{ row.label }}</div>
+    <div class="pc-q-bar" role="img" aria-label="{% if row.limit is not None %}{% blocktrans with name=row.label used=row.used_text limit=row.limit_text %}{{ name }}: {{ used }} of {{ limit }} used{% endblocktrans %}{% else %}{% blocktrans with name=row.label used=row.used_text %}{{ name }}: {{ used }} used, no limit{% endblocktrans %}{% endif %}{% for seg in row.segments %}; {{ seg.label }} {{ seg.text }}{% endfor %}">
+      {% for seg in row.segments %}<div class="pc-seg pc-seg-{{ seg.group }}" style="flex: 0 0 {{ seg.width|floatformat:'2u' }}%;" title="{{ seg.label }}: {{ seg.text }}"></div>{% endfor %}
+    </div>
+    <div class="pc-q-val"><strong class="{% if row.level == 'critical' %}text-danger{% elif row.level == 'warning' %}text-warning{% endif %}">{{ row.used_text }}</strong> / {% if row.limit is not None %}{{ row.limit_text }} <span class="text-muted">({{ row.percent|floatformat:0 }}%)</span>{% else %}<span class="text-muted">{% trans "no limit" %}</span>{% endif %}</div>
+    <div class="pc-q-fc">
+      {% with f=row.forecast %}
+      {% if f.state == "days" %}
+        {% if f.level == "critical" %}<span class="text-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i>{% elif f.level == "warning" %}<span class="text-warning"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i>{% else %}<span class="text-muted"><i class="fa fa-clock-o" aria-hidden="true"></i>{% endif %}
+        {% blocktrans count days=f.days %}Full in ~{{ days }} day{% plural %}Full in ~{{ days }} days{% endblocktrans %}</span>
+      {% elif f.state == "full" %}<span class="text-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {% trans "Full" %}</span>
+      {% elif f.state == "flat" %}<span class="text-success"><i class="fa fa-check" aria-hidden="true"></i> {% trans "Not growing" %}</span>
+      {% elif f.state == "far" %}<span class="text-muted"><i class="fa fa-clock-o" aria-hidden="true"></i> {% trans "Full in more than a year" %}</span>
+      {% elif f.state == "no_history" or f.state == "short_retention" %}<span class="text-muted"><i class="fa fa-hourglass-half" aria-hidden="true"></i> {% trans "Not enough history" %}</span>
+      {% elif f.state == "unlimited" %}<span class="text-muted">{% trans "No limit" %}</span>
+      {% elif forecast_unavailable %}<span class="text-muted"><i class="fa fa-question-circle" aria-hidden="true"></i> {% if loading %}{% trans "Loading the forecast…" %}{% else %}{% trans "Forecast unavailable" %}{% endif %}</span>
+      {% else %}<span class="text-muted">{% trans "No forecast" %}</span>{% endif %}
+      {% endwith %}
+    </div>
+  </div>
+  {% endfor %}
+  <div class="pc-q-legend pc-muted">
+    <span><span class="pc-sw pc-seg-running" aria-hidden="true"></span>{% trans "Running instances" %}</span>
+    <span><span class="pc-sw pc-seg-stopped" aria-hidden="true"></span>{% trans "Shut off (also paused, suspended or shelved)" %}</span>
+    <span><span class="pc-sw pc-seg-error" aria-hidden="true"></span>{% trans "Error" %}</span>
+  </div>
+  <p class="pc-muted" style="margin: 10px 0 0;">{% blocktrans count days=forecast_days %}The forecast extends the trend of the last {{ days }} day. Shut-off and errored instances still count against your quota.{% plural %}The forecast extends the trend of the last {{ days }} days. Shut-off and errored instances still count against your quota.{% endblocktrans %}{% if forecast_days < 30 %} {% blocktrans count days=retention_days %}(Metrics are kept for {{ days }} day.){% plural %}(Metrics are kept for {{ days }} days.){% endblocktrans %}{% endif %}</p>
+  {% if any_mismatch %}<p class="pc-muted" style="margin: 4px 0 0;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% trans "The totals are the Compute API counts; the bars add up the instance list, which can differ while instances are being created or deleted, or when your cloud does not count shelved-offloaded instances against the vCPU and RAM quotas." %}</p>{% endif %}
+  {% if data_stale %}<p class="text-warning" style="margin: 6px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>
+  {% elif data_old %}<p style="margin: 6px 0 0;"><i class="fa fa-refresh" aria-hidden="true"></i> {% trans "Refreshing: the data shown may be out of date." %}</p>{% endif %}
+  {% if loading %}{% include "project/telemetry_compute/_retry.html" %}{% endif %}
+  {% endif %}
+  </div>
+</div>

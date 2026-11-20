@@ -1,0 +1,35 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-bell" aria-hidden="true"></i> {% trans "Instances needing attention" %}
+    <span class="pc-bounded">{% blocktrans with n=table_limit %}max {{ n }} rows{% endblocktrans %}</span></h3></div>
+  {% if error_message %}
+  <div class="panel-body"><div data-pc-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+  {% include "project/telemetry_compute/_retry.html" %}</div>
+  {% else %}
+  <div class="table-responsive">
+    <table class="table pc-table" style="margin-bottom: 0;">
+      <thead><tr><th>{% trans "Severity" %}</th><th>{% trans "Instance" %}</th><th>{% trans "Status" %}</th><th>{% trans "Issues" %}</th><th>{% trans "What to do" %}</th></tr></thead>
+      <tbody>
+      {% for row in rows %}
+      <tr class="{% if row.severity == 3 %}danger{% else %}warning{% endif %}">
+        <td>{% if row.severity == 3 %}<span class="label label-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {% trans "Critical" %}</span>{% else %}<span class="label label-warning"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Warning" %}</span>{% endif %}</td>
+        <td>{% if row.metrics_url %}<a class="pc-link" href="{{ row.metrics_url }}" title="{% trans 'Metrics of this instance' %}">{{ row.name }}</a>{% else %}<strong>{{ row.name }}</strong>{% endif %}<br><small class="text-muted" title="{{ row.id }}">{{ row.id|truncatechars:9 }}</small></td>
+        <td>{% if row.status %}{% include "project/telemetry_compute/_status.html" with status=row.status %}{% else %}<span class="text-muted">–</span>{% endif %}</td>
+        <td>{% for issue in row.issues %}<span class="pc-tag {% if issue.severity == 3 %}pc-tag-crit{% else %}pc-tag-warn{% endif %}">{{ issue.text }}</span>{% endfor %}</td>
+        <td class="pc-advice">{% if row.fault %}<strong>{% trans "Fault:" %}</strong> {{ row.fault }} {% endif %}{{ row.advice_text }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="text-center text-muted" style="padding: 20px;"><i class="fa fa-check-circle text-success" aria-hidden="true"></i> {% trans "No instance in this project needs attention." %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="panel-footer pc-muted">
+    {% for note in partial_notes %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {{ note }}</p>{% endfor %}{% if loading %}{% include "project/telemetry_compute/_retry.html" %}{% endif %}
+    {% if data_stale %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>
+    {% elif data_old %}<p style="margin: 0 0 4px;"><i class="fa fa-refresh" aria-hidden="true"></i> {% trans "Refreshing: the data shown may be out of date." %}</p>{% endif %}
+    {% if more %}<p style="margin: 0 0 4px;">{% blocktrans with shown=rows|length count n=count %}{{ n }} instance needs attention, {{ shown }} shown.{% plural %}{{ n }} instances need attention, {{ shown }} shown.{% endblocktrans %}</p>{% endif %}
+    <i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with w=current_window_text %}Same checks as the admin Instance Health panel, limited to this project. Symptoms use the last {{ w }}.{% endblocktrans %}
+  </div>
+  {% endif %}
+</div>

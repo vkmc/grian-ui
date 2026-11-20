@@ -99,6 +99,44 @@ class FakeTelemetryClient(DatasourceClient):
             },
         ]
 
+    # Project Compute (sample data in fake_project_compute) ---------------
+
+    def get_project_compute_snapshot(self, matcher: str) -> dict:
+        from grian_ui.datasource import fake_project_compute
+
+        return fake_project_compute.get_snapshot()
+
+    def get_project_compute_rightsizing(self, matcher: str) -> dict:
+        from grian_ui.datasource import fake_project_compute
+
+        return fake_project_compute.get_rightsizing()
+
+    def get_project_compute_forecast(self, matcher: str, days: int) -> dict:
+        from grian_ui.datasource import fake_project_compute
+
+        return fake_project_compute.get_forecast(days)
+
+    def get_project_compute_trend(
+        self, matcher: str, resource: str, range_key: str, at: float = None
+    ) -> dict:
+        from grian_ui.datasource import fake_project_compute
+
+        return fake_project_compute.get_trend(resource, range_key, at)
+
+    def get_project_compute_cpu_series(
+        self, matcher: str, instance_ids: list, at: float = None
+    ) -> dict:
+        from grian_ui.datasource import fake_project_compute
+
+        return fake_project_compute.get_cpu_series(instance_ids, at)
+
+    def get_project_compute_instance_trend(
+        self, matcher: str, instance_id: str, at: float = None
+    ) -> dict:
+        from grian_ui.datasource import fake_project_compute
+
+        return fake_project_compute.get_instance_trend(instance_id, at)
+
 
 def get_client(request=None) -> DatasourceClient:
     """

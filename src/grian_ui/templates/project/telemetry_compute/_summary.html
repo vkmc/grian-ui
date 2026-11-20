@@ -1,0 +1,88 @@
+{% load i18n %}
+{% if error_message %}
+<div data-pc-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "project/telemetry_compute/_retry.html" %}
+{% else %}
+{% if metrics_unavailable %}
+<div class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" id="pc-metrics-alert">
+  <i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i>
+  {% if loading %}{% trans "Loading telemetry data from the metric-storage (Aetos) endpoint…" %}
+  {% else %}<strong>{% trans "Could not load telemetry data" %}</strong> {% blocktrans %}from the metric-storage (Aetos) endpoint. Quota usage below comes from the Compute API and is up to date; usage trends, rightsizing and symptoms are unavailable. Retrying at the next refresh.{% endblocktrans %}{% endif %}
+</div>
+{% endif %}
+{% if history_hours is not None %}
+<div class="alert alert-info" id="pc-history-alert"><i class="fa fa-hourglass-half" aria-hidden="true"></i>
+  {% if history_hours %}<strong>{% blocktrans count hours=history_hours %}About {{ hours }} hour of history.{% plural %}About {{ hours }} hours of history.{% endblocktrans %}</strong>{% else %}<strong>{% trans "No metric history yet." %}</strong>{% endif %}
+  {% blocktrans count days=min_history_days %}The metrics of this project cover less than {{ days }} day, so the rightsizing assessments are provisional and there is no forecast yet.{% plural %}The metrics of this project cover less than {{ days }} days, so the rightsizing assessments are provisional and there is no forecast yet.{% endblocktrans %}
+</div>
+{% elif retention_days < min_history_days %}
+<div class="alert alert-info" id="pc-history-alert"><i class="fa fa-hourglass-half" aria-hidden="true"></i>
+  {% blocktrans count days=retention_days %}Metrics are kept for {{ days }} day only: assessments stay provisional and there is no forecast.{% plural %}Metrics are kept for {{ days }} days only: assessments stay provisional and there is no forecast.{% endblocktrans %}
+</div>
+{% endif %}
+<div class="row pc-cards">
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pc-card {% if highest %}pc-card-{{ highest.level }}{% else %}pc-card-info{% endif %}"><div class="panel-heading">
+      <i class="fa fa-pie-chart pc-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="pc-value">{% if highest %}{{ highest.percent|floatformat:0 }}%{% else %}–{% endif %}</div>
+        <div class="pc-label">{% trans "Highest quota use" %}</div>
+        <div class="pc-sub">{% if highest %}{{ highest_detail }}{% else %}{% trans "no compute limit" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pc-card pc-card-info"><div class="panel-heading">
+      <i class="fa fa-desktop pc-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="pc-value">{{ counts.running }}<small> / {{ counts.total }}</small></div>
+        <div class="pc-label">{% trans "Instances running" %}</div>
+        <div class="pc-sub">{% if counts.not_running %}{% blocktrans count n=counts.not_running %}{{ n }} not running{% plural %}{{ n }} not running{% endblocktrans %}{% elif counts.total %}{% trans "all running" %}{% else %}{% trans "no instances" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pc-card pc-card-{{ idle_level }}"><div class="panel-heading">
+      <i class="fa fa-pause-circle pc-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="pc-value">{% if idle.ram %}{{ idle_ram_text }}{% else %}0{% endif %}</div>
+        <div class="pc-label">{% trans "RAM quota held by idle instances" %}</div>
+        <div class="pc-sub">{% if idle.instances %}{% blocktrans with vcpus=idle.vcpus count n=idle.instances %}{{ vcpus }} vCPU | {{ n }} instance{% plural %}{{ vcpus }} vCPU | {{ n }} instances{% endblocktrans %}{% if idle_percent is not None %} | {% blocktrans with p=idle_percent|floatformat:0 %}{{ p }}% of your RAM quota{% endblocktrans %}{% endif %}{% else %}{% trans "none" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    {% if resize %}
+    <div class="panel pc-card {% if resize.counts.under %}pc-card-warning{% else %}pc-card-ok{% endif %}"><div class="panel-heading">
+      <i class="fa fa-balance-scale pc-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="pc-value">{{ resize.counts.under|add:resize.counts.over }}</div>
+        <div class="pc-label">{% trans "Instances to resize" %}</div>
+        <div class="pc-sub">{% blocktrans with u=resize.counts.under o=resize.counts.over %}{{ u }} undersized | {{ o }} oversized{% endblocktrans %}{% if resize.provisional %} {% trans "(provisional)" %}{% endif %}</div>
+      </div>
+    </div></div>
+    {% else %}
+    <div class="panel pc-card pc-card-unknown"><div class="panel-heading">
+      <i class="fa fa-balance-scale pc-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="pc-value">?</div>
+        <div class="pc-label">{% trans "Instances to resize" %}</div>
+        <div class="pc-sub">{% if loading %}{% trans "loading…" %}{% else %}{% trans "metrics unavailable" %}{% endif %}</div>
+      </div>
+    </div></div>
+    {% endif %}
+  </div>
+</div>
+{% if nova_stale %}
+<div class="alert alert-warning" style="margin: 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
+  {% blocktrans %}The Compute API could not be reached. Showing the last data received, from <span class="pc-clock" data-ts="{{ fetched_ts }}"></span>.{% endblocktrans %}</div>
+{% elif nova_old %}
+<div class="alert alert-info" style="margin: 0;"><i class="fa fa-refresh" aria-hidden="true"></i>
+  {% blocktrans %}Refreshing: the data shown may be out of date (from <span class="pc-clock" data-ts="{{ fetched_ts }}"></span>).{% endblocktrans %}</div>
+{% elif fetched_ts %}
+{% if data_stale %}<p class="text-warning" style="margin: 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Telemetry data could not be refreshed: the resize count may be out of date." %}</p>{% endif %}
+<div class="pc-muted text-right">{% trans "Compute API data from" %} <span class="pc-clock" data-ts="{{ fetched_ts }}"></span></div>
+{% endif %}
+{% include "project/telemetry_compute/_retry.html" %}
+<script>pc.showClocks(document.getElementById('pc-summary'));</script>
+{% endif %}

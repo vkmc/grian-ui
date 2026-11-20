@@ -215,3 +215,78 @@ def get_openstack_keystone_url():
 def get_openstack_endpoint_type():
     """Get OpenStack endpoint type (interface) from settings."""
     return getattr(settings, "OPENSTACK_ENDPOINT_TYPE", "publicURL")
+
+
+#: Default Project Compute thresholds (see grian_ui.project_compute).
+DEFAULT_PROJECT_COMPUTE_THRESHOLDS = {
+    # quota use, percent of the limit
+    "quota_warning": 75,
+    "quota_critical": 90,
+    # RAM held by instances that are not running, percent of the RAM quota,
+    # at or above which the summary card turns red
+    "idle_ram_critical": 25,
+    # share of vCPU time spent waiting for a host CPU, percent
+    "cpu_wait_warning": 5,
+    "cpu_wait_critical": 20,
+    # guest swap in + out, MiB/s (a warning above the warning value)
+    "swap_warning": 0,
+    "swap_critical": 10,
+    # average time per write request on the worst disk, ms
+    "disk_latency_warning": 20,
+    "disk_latency_critical": 100,
+    # disk latency is only judged on disks writing at least this much, MiB/s
+    # (a handful of requests gives meaningless averages)
+    "disk_write_floor": 1,
+}
+
+
+def get_project_compute_thresholds():
+    """
+    Get the Project Compute quota and symptom thresholds.
+
+    Defaults (DEFAULT_PROJECT_COMPUTE_THRESHOLDS) can be overridden per key
+    with ``GRIAN_PLUGIN['project_compute_thresholds']``. See
+    get_thresholds().
+
+    Raises:
+        ConfigurationError: If an override is unknown or out of range
+    """
+    return get_thresholds(
+        "project_compute_thresholds", DEFAULT_PROJECT_COMPUTE_THRESHOLDS
+    )
+
+
+#: Default Project Compute rightsizing thresholds, percent of the flavor:
+#: undersized at or above a ``_high`` value, oversized when CPU (7-day 95th
+#: percentile) and memory (7-day average) are both below their ``_low``
+#: value.
+DEFAULT_PROJECT_RIGHTSIZING_THRESHOLDS = {
+    "cpu_high": 80,
+    "cpu_low": 10,
+    "memory_high": 90,
+    "memory_low": 30,
+}
+
+
+def get_project_rightsizing_thresholds():
+    """
+    Get the Project Compute rightsizing thresholds (percent).
+
+    Defaults (DEFAULT_PROJECT_RIGHTSIZING_THRESHOLDS) can be overridden per
+    key with ``GRIAN_PLUGIN['project_rightsizing_thresholds']``. A ``_low``
+    value must not be greater than the matching ``_high`` value.
+
+    Raises:
+        ConfigurationError: If an override is unknown or out of range
+    """
+    thresholds = get_thresholds(
+        "project_rightsizing_thresholds",
+        DEFAULT_PROJECT_RIGHTSIZING_THRESHOLDS,
+    )
+    for name in ("cpu", "memory"):
+        if thresholds[f"{name}_low"] > thresholds[f"{name}_high"]:
+            raise ConfigurationError(
+                f"GRIAN_PLUGIN['project_rightsizing_thresholds']['{name}_low'] "
+                f"must not be greater than '{name}_high'"
+            )
+    return thresholds

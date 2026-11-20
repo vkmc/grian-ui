@@ -1,0 +1,54 @@
+{% load i18n %}
+{% if invalid %}
+<p class="text-danger" style="margin: 6px 0;">{% trans "Invalid instance ID." %}</p>
+{% elif error_message %}
+<div data-pc-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 6px 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "project/telemetry_compute/_retry.html" %}
+<script>pc.destroyCharts('detail-{{ instance_id|escapejs }}-');</script>
+{% else %}
+{% if has_data %}
+<div class="row">
+  <div class="col-md-6">
+    <strong class="pc-muted" style="color: #333;">{% trans "CPU used (vCPUs)" %}</strong>
+    <div class="pc-legend pc-muted"><span><span class="pc-ln" style="border-color: #337ab7;" aria-hidden="true"></span>{% trans "Used" %}</span>{% if chart.vcpus %}<span><span class="pc-ln pc-dash" style="border-color: #767676;" aria-hidden="true"></span>{% trans "vCPUs in flavor" %}</span>{% endif %}</div>
+    <div class="pc-chart-sm"><canvas id="pc-detail-cpu-{{ uid }}" role="img" aria-label="{% trans 'CPU used over the last 7 days' %}" aria-describedby="pc-detail-cpu-{{ uid }}-text"></canvas></div>
+    <p class="sr-only" id="pc-detail-cpu-{{ uid }}-text">{% if cpu_summary %}{% blocktrans with latest=cpu_summary.latest min=cpu_summary.min max=cpu_summary.max n=chart.vcpus %}CPU used, in vCPUs of {{ n }}: latest {{ latest }}, lowest {{ min }}, highest {{ max }}.{% endblocktrans %}{% endif %}</p>
+  </div>
+  <div class="col-md-6">
+    <strong class="pc-muted" style="color: #333;">{% trans "Memory used" %}</strong>
+    <div class="pc-legend pc-muted"><span><span class="pc-ln" style="border-color: #337ab7;" aria-hidden="true"></span>{% trans "Used" %}</span>{% if chart.ram %}<span><span class="pc-ln pc-dash" style="border-color: #767676;" aria-hidden="true"></span>{% trans "Flavor RAM" %}</span>{% endif %}</div>
+    <div class="pc-chart-sm"><canvas id="pc-detail-mem-{{ uid }}" role="img" aria-label="{% trans 'Memory used over the last 7 days' %}" aria-describedby="pc-detail-mem-{{ uid }}-text"></canvas></div>
+    <p class="sr-only" id="pc-detail-mem-{{ uid }}-text">{% if memory_summary %}{% blocktrans with latest=memory_summary.latest min=memory_summary.min max=memory_summary.max %}Memory used: latest {{ latest }}, lowest {{ min }}, highest {{ max }}.{% endblocktrans %}{% endif %}</p>
+  </div>
+</div>
+{% with data_id="pc-detail-data-"|add:uid %}{{ chart|json_script:data_id }}{% endwith %}
+<script>
+(function () {
+  var d = pc.readJson('pc-detail-data-{{ uid }}');
+  var prefix = 'detail-{{ instance_id|escapejs }}-';
+  var labels = d.timestamps.map(function (t) { return pc.formatTime(t, '7d'); });
+  var n = labels.length;
+  var cpu = [{ label: '{% filter escapejs %}{% trans "CPU used" %}{% endfilter %}', data: d.cpu, borderColor: pc.colors.blue,
+    backgroundColor: pc.colors.blueFill, fill: 'origin', borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: .25 }];
+  if (d.vcpus) { cpu.push(pc.refLine('{% filter escapejs %}{% trans "vCPUs" %}{% endfilter %}', d.vcpus, n)); }
+  pc.lineChart(prefix + 'cpu', document.getElementById('pc-detail-cpu-{{ uid }}'), labels, cpu, pc.formatCores,
+    d.vcpus ? d.vcpus * 1.1 : undefined);
+  var mem = [{ label: '{% filter escapejs %}{% trans "Memory used" %}{% endfilter %}', data: d.memory, borderColor: pc.colors.blue,
+    backgroundColor: pc.colors.blueFill, fill: 'origin', borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: .25 }];
+  if (d.ram) { mem.push(pc.refLine('{% filter escapejs %}{% trans "Flavor RAM" %}{% endfilter %}', d.ram, n)); }
+  pc.lineChart(prefix + 'mem', document.getElementById('pc-detail-mem-{{ uid }}'), labels, mem, pc.formatMib,
+    d.ram ? d.ram * 1.1 : undefined);
+})();
+</script>
+{% else %}
+<script>pc.destroyCharts('detail-{{ instance_id|escapejs }}-');</script>
+<p class="text-muted" style="margin: 6px 0;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% trans "No metrics for this instance in the last 7 days." %}</p>
+{% endif %}
+{% if assessment.hint %}<p style="margin: 8px 0 2px;"><i class="fa fa-lightbulb-o" aria-hidden="true"></i> {{ assessment.hint }}</p>{% endif %}
+<p class="pc-muted" style="margin: 6px 0 0;">
+  {% if metrics_url %}<a href="{{ metrics_url }}"><i class="fa fa-line-chart" aria-hidden="true"></i> {% blocktrans with name=name %}All metrics for {{ name }}{% endblocktrans %}</a>{% endif %}
+  {% if metrics_url and resize_url %} | {% endif %}
+  {% if resize_url %}<a href="{{ resize_url }}"><i class="fa fa-arrows-alt" aria-hidden="true"></i> {% trans "Resize instance…" %}</a> {% trans "(Project > Compute > Instances)" %}{% endif %}
+  {% if data_stale %}<span class="text-warning"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</span>{% elif data_old %}<span><i class="fa fa-refresh" aria-hidden="true"></i> {% trans "Refreshing: the data shown may be a few minutes old." %}</span>{% endif %}
+</p>
+{% endif %}

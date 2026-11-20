@@ -1,0 +1,80 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-balance-scale" aria-hidden="true"></i> {% trans "Allocated vs used (rightsizing)" %}
+    <span class="pc-bounded">{% blocktrans with n=table_limit %}max {{ n }} rows{% endblocktrans %}</span></h3></div>
+  {% if error_message %}
+  <div class="panel-body"><div data-pc-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {% if loading %}{{ error_message }}{% else %}{% trans "Unavailable: no metrics." %} {{ error_message }}{% endif %}</div>
+  {% include "project/telemetry_compute/_retry.html" %}</div>
+  <script>pc.sparks.forEach(function (c) { c.destroy(); }); pc.sparks = []; pc.destroyCharts('detail-');</script>
+  {% else %}
+  <div class="panel-body" style="padding-bottom: 0;">
+    {% if summary.assessed %}
+    <p style="font-size: 14px;">{% blocktrans with used=summary.cpu_used_text held=summary.vcpus p=summary.cpu_percent|floatformat:0 mem=summary.memory_used_text ram=summary.ram_text mp=summary.memory_percent|floatformat:0 %}Running instances use <strong>{{ used }} of the {{ held }} vCPUs</strong> they hold ({{ p }}%) and <strong>{{ mem }} of {{ ram }} RAM</strong> ({{ mp }}%), on average over the last 7 days.{% endblocktrans %}</p>
+    {% endif %}
+    <div class="btn-group btn-group-sm" role="group" aria-label="{% trans 'Show one group' %}" id="pc-rs-filter" style="margin-bottom: 10px;">
+      {% for f in filters %}
+      <button type="button" class="btn btn-default{% if f.key == group or not f.key and not group %} active{% endif %}" data-group="{{ f.key }}"
+              aria-pressed="{% if f.key == group or not f.key and not group %}true{% else %}false{% endif %}"
+              onclick="pc.set({group: '{{ f.key }}'})">{{ f.label }} <span class="badge">{{ f.count }}</span></button>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover pc-table" style="margin-bottom: 0;">
+      <thead><tr><th class="pc-caret"><span class="sr-only">{% trans "Details" %}</span></th><th>{% trans "Instance" %}</th><th>{% trans "Flavor" %}</th><th>{% trans "CPU used ÷ vCPUs" %}</th><th>{% trans "Memory used ÷ flavor RAM" %}</th>
+        <th>{% trans "Root disk used" %}</th><th>{% trans "Assessment" %}</th><th>{% trans "CPU, last 7 days" %}</th></tr></thead>
+      <tbody>
+      {% for row in rows %}
+      <tr class="pc-row-main" data-pc-instance="{{ row.id }}" tabindex="0" aria-expanded="false" title="{% trans 'Show the trend charts' %}">
+        <td class="pc-caret"><i class="fa fa-caret-right" aria-hidden="true"></i></td>
+        <td>{% if row.metrics_url %}<a class="pc-link" href="{{ row.metrics_url }}" title="{% trans 'All metrics of this instance' %}">{{ row.name }}</a>{% else %}<strong title="{{ row.id }}">{{ row.name }}</strong>{% endif %}</td>
+        <td>{{ row.flavor|default:"–" }}<br><small class="text-muted">{% if row.vcpus is not None %}{% blocktrans with n=row.vcpus ram=row.ram_text %}{{ n }} vCPU | {{ ram }}{% endblocktrans %}{% else %}{{ row.ram_text }}{% endif %}</small></td>
+        <td>{% if row.cpu is not None %}<span class="pc-ratio{% if row.cpu_level %} pc-{{ row.cpu_level }}{% endif %}" aria-hidden="true"><span style="width: {% widthratio row.cpu 1 100 as w %}{% if row.cpu > 1 %}100{% else %}{{ w }}{% endif %}%;"></span></span>{% blocktrans with used=row.cpu_used_text n=row.vcpus %}{{ used }} of {{ n }}{% endblocktrans %} <small class="text-muted">({% widthratio row.cpu 1 100 %}%)</small>{% else %}<span class="text-muted">{% trans "no data" %}</span>{% endif %}</td>
+        <td>{% if row.memory is not None %}<span class="pc-ratio{% if row.memory_level %} pc-{{ row.memory_level }}{% endif %}" aria-hidden="true"><span style="width: {% widthratio row.memory 1 100 as w %}{% if row.memory > 1 %}100{% else %}{{ w }}{% endif %}%;"></span></span>{% blocktrans with used=row.memory_used_text ram=row.ram_text %}{{ used }} of {{ ram }}{% endblocktrans %} <small class="text-muted">({% widthratio row.memory 1 100 %}%)</small>{% else %}<span class="text-muted">{% trans "no data" %}</span>{% endif %}{% if row.swap %} <span class="pc-tag pc-tag-warn" title="{% trans 'The guest swapped in the last 7 days' %}">{% trans "swap" %}</span>{% endif %}</td>
+        <td>{% if row.disk_ratio is not None %}{% widthratio row.disk_ratio 1 100 %}% <small class="text-muted">{% blocktrans with c=row.disk_capacity_text %}of {{ c }}{% endblocktrans %}</small>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+        <td>{% if row.assessment %}<span class="pc-tag {{ row.tag_class }}"><i class="fa {{ row.tag_icon }}" aria-hidden="true"></i> {{ row.label }}</span>
+          {% if row.provisional %}<br><small class="text-muted">{% if row.hours is not None %}{% blocktrans count h=row.hours %}provisional | {{ h }} h of data{% plural %}provisional | {{ h }} h of data{% endblocktrans %}{% else %}{% trans "provisional" %}{% endif %}</small>{% endif %}
+          {% if row.notes %}<br><small class="text-muted">{{ row.notes|join:", " }}</small>{% endif %}
+          {% else %}<span class="pc-tag pc-tag-info">{% trans "No data" %}</span><br><small class="text-muted">{% trans "no metrics in the last 7 days" %}</small>{% endif %}</td>
+        <td>{% if row.assessment %}<canvas class="pc-spark" data-pc-spark="{{ row.id }}" width="110" height="28" aria-hidden="true"></canvas>{% endif %}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="text-center text-muted" style="padding: 20px;">{% if group %}{% trans "No instances in this group." %}{% else %}{% trans "No running instances in this project." %}{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="panel-footer pc-muted">
+    {% for note in partial_notes %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {{ note }}</p>{% endfor %}{% if loading %}{% include "project/telemetry_compute/_retry.html" %}{% endif %}
+    {% if data_stale %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>
+    {% elif data_old %}<p style="margin: 0 0 4px;"><i class="fa fa-refresh" aria-hidden="true"></i> {% trans "Refreshing: the data shown may be out of date." %}</p>{% endif %}
+    {% if matching > rows|length %}<p style="margin: 0 0 4px;">{% blocktrans with shown=rows|length count n=matching %}{{ n }} instance, {{ shown }} shown.{% plural %}{{ n }} instances, {{ shown }} shown.{% endblocktrans %}</p>{% endif %}
+    <i class="fa fa-info-circle" aria-hidden="true"></i> {% trans "Running instances only, sorted by how far they are from their flavor. Click a row for the trend charts." %}
+    {% if fetched_ts %}{% blocktrans %}7-day statistics from <span class="pc-clock" data-ts="{{ fetched_ts }}"></span> (refreshed every 10 minutes).{% endblocktrans %}{% endif %}
+  </div>
+  {% with data_id="pc-sparks-"|add:uid %}{{ sparks|json_script:data_id }}{% endwith %}
+  <script>
+  (function () {
+    var root = document.getElementById('pc-sparks-{{ uid }}').closest('.panel');
+    pc.showClocks(root);
+    pc.sparks.forEach(function (c) { c.destroy(); });
+    pc.sparks = [];
+    pc.destroyCharts('detail-');
+    var sparks = pc.readJson('pc-sparks-{{ uid }}') || {};
+    root.querySelectorAll('canvas[data-pc-spark]').forEach(function (canvas) {
+      var s = sparks[canvas.getAttribute('data-pc-spark')];
+      if (!s || !s.values.some(function (v) { return v !== null; })) { return; }
+      pc.sparks.push(new Chart(canvas, {
+        type: 'line',
+        data: { labels: s.values.map(function () { return ''; }),
+          datasets: [{ data: s.values, spanGaps: false, borderWidth: 1.5, pointRadius: 0, tension: .3, fill: false,
+            borderColor: s.busy ? pc.colors.crit : pc.colors.blue }] },
+        options: { responsive: false, animation: false,
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
+          scales: { x: { display: false }, y: { display: false, min: 0, max: s.max || undefined } } }
+      }));
+    });
+  })();
+  </script>
+  {% endif %}
+</div>

@@ -1,0 +1,19 @@
+---
+features:
+  - |
+    Add the Compute dashboard under Project > Telemetry. It shows the
+    current project's compute quota (instances, vCPUs, RAM) split by
+    running, shut-off and errored instances, with a forecast of when each
+    quota is full; what running instances held over 6 hours to 30 days;
+    the instances holding quota without running; a 7-day rightsizing table
+    (undersized, oversized or right-sized instances against their flavor);
+    and the instances needing attention (ERROR state, CPU wait, swap, slow
+    disk writes). Data comes from the Compute API, read with the user's
+    token, and from the Ceilometer instance meters through Aetos, always
+    filtered on the current project. Thresholds can be configured with
+    ``GRIAN_PLUGIN['project_compute_thresholds']`` and
+    ``GRIAN_PLUGIN['project_rightsizing_thresholds']``; the forecast and
+    the chart ranges follow ``GRIAN_PLUGIN['metrics_retention_days']``.
+    Install ``_1101_project_telemetry_compute_panel.py`` together with
+    ``_1100_project_telemetry_panel_group.py`` and
+    ``_1000_admin_telemetry_panel_group.py``.
