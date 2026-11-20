@@ -1,0 +1,35 @@
+{% load i18n %}
+{# Charts of this group are only kept when this response draws them. #}
+{% if not chart %}<script>im.destroyCharts('{{ group|escapejs }}:');</script>{% endif %}
+{% if error_message %}
+{% if not not_found %}{# the instance header already says it is not found #}
+<div class="col-md-6"><div class="panel panel-default">
+  <div class="panel-heading"><h3 class="panel-title">{{ group_label }}</h3></div>
+  <div class="panel-body">
+    <div data-im-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+  </div>
+</div></div>
+{% endif %}
+{% include "project/instance_metrics/_retry.html" %}
+{% elif chart %}
+{% for c in charts %}
+<div class="col-md-6"><div class="panel panel-default" data-im-chart="{{ c.key }}">
+  <div class="panel-heading"><h3 class="panel-title">{{ c.label }}</h3></div>
+  <div class="panel-body">
+    {% if c.has_data %}
+    <div class="im-legend">{% for s in c.datasets %}<span><span class="im-ln{% if s.dash %} im-dash{% endif %} im-color-{{ s.color }}" aria-hidden="true"></span>{{ s.label }}</span>{% endfor %}</div>
+    <div class="im-chart"><canvas id="im-canvas-{{ uid }}-{{ c.key }}" role="img" aria-label="{{ c.label }}" aria-describedby="im-summary-{{ uid }}-{{ c.key }}"></canvas></div>
+    <p class="sr-only" id="im-summary-{{ uid }}-{{ c.key }}">{% for s in c.summary %}{% blocktrans with label=s.label latest=s.latest min=s.min max=s.max %}{{ label }}: latest {{ latest }}, lowest {{ min }}, highest {{ max }}.{% endblocktrans %} {% endfor %}</p>
+    {% elif c.too_few_writes %}
+    <p class="text-muted im-empty" data-im-nodata style="padding: 20px 10px;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with range=range %}Too few writes in the last {{ range }} to measure the latency.{% endblocktrans %}</p>
+    {% else %}
+    <p class="text-muted im-empty" data-im-nodata style="padding: 20px 10px;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with range=range %}No data in the last {{ range }}.{% endblocktrans %}</p>
+    {% endif %}
+    <p class="im-muted" style="margin: 6px 0 0;">{{ c.note }}{% if c.has_data and c.key != "disk_latency" %} {% trans "Gaps mean no data." %}{% endif %}</p>
+    {% if data_stale %}<p class="text-warning" style="margin: 6px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>{% elif data_old %}<p class="im-muted" style="margin: 6px 0 0;"><i class="fa fa-refresh" aria-hidden="true"></i> {% trans "Refreshing: the data shown may be out of date." %}</p>{% endif %}
+  </div>
+</div></div>
+{% endfor %}
+{% with data_id="im-data-"|add:uid %}{{ chart|json_script:data_id }}{% endwith %}
+<script>im.drawGroup('{{ group|escapejs }}', '{{ uid }}');</script>
+{% endif %}

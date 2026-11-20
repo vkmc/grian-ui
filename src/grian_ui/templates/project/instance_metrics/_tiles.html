@@ -1,0 +1,30 @@
+{% load i18n %}
+{% if error_message %}
+{% if not not_found %}{# the instance header already says it is not found #}
+<div data-im-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% endif %}
+{% include "project/instance_metrics/_retry.html" %}
+{% elif state == 'active' %}
+{% if not has_data %}
+<p class="text-muted" data-im-nodata style="margin: 0;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% blocktrans with r=tile_range %}No metrics for this instance in the last {{ r }}. A newly started instance reports after the first polling interval; if it stays empty, the Ceilometer compute agent may not be polling its host.{% endblocktrans %}</p>
+{% else %}
+<div class="im-tiles">
+  {% for t in tiles %}
+  <div class="im-tile" data-im-tile="{{ t.key }}">
+    <div class="im-tile-label">{{ t.label }}</div>
+    <div class="im-tile-value{% if t.level %} text-{{ t.level }}{% endif %}">{{ t.value }}{% if t.unit %} <small>{{ t.unit }}</small>{% endif %}{% if t.level == 'danger' %} <i class="fa fa-exclamation-circle" aria-hidden="true"></i><span class="sr-only">{% trans "(critical)" %}</span>{% elif t.level == 'warning' %} <i class="fa fa-exclamation-triangle" aria-hidden="true"></i><span class="sr-only">{% trans "(warning)" %}</span>{% endif %}</div>
+    <div class="im-tile-sub">{{ t.sub }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% if partial_failure %}<p class="text-warning" style="margin: 6px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% if loading %}{% trans "Some values are still loading." %}{% else %}{% trans "Some values could not be loaded." %}{% endif %}</p>{% include "project/instance_metrics/_retry.html" %}{% endif %}
+{% if data_stale %}
+<p class="text-warning" style="margin: 6px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% blocktrans %}Telemetry data could not be refreshed. Showing the last data received, from <span class="im-clock" data-ts="{{ fetched_ts }}"></span>.{% endblocktrans %}</p>
+{% elif data_old %}
+<p class="im-muted" style="margin: 6px 0 0;"><i class="fa fa-refresh" aria-hidden="true"></i> {% blocktrans %}Refreshing: the data shown may be out of date (from <span class="im-clock" data-ts="{{ fetched_ts }}"></span>).{% endblocktrans %}</p>
+{% else %}
+<div class="im-muted text-right" style="margin-top: 4px;">{% trans "Data from" %} <span class="im-clock" data-ts="{{ fetched_ts }}"></span></div>
+{% endif %}
+<script>im.showClocks(document.getElementById('im-tiles'));</script>
+{% endif %}

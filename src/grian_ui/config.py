@@ -215,3 +215,72 @@ def get_openstack_keystone_url():
 def get_openstack_endpoint_type():
     """Get OpenStack endpoint type (interface) from settings."""
     return getattr(settings, "OPENSTACK_ENDPOINT_TYPE", "publicURL")
+
+
+#: Default thresholds of the project Instance metrics page.
+DEFAULT_PROJECT_INSTANCE_METRICS_THRESHOLDS = {
+    # CPU tile in red at this share of the flavor's vCPUs, percent
+    "cpu_busy": 80,
+    # share of vCPU time spent waiting for a host CPU, percent
+    "cpu_wait_warning": 5,
+    "cpu_wait_critical": 20,
+    # time per disk write request, ms
+    "disk_latency_warning": 20,
+    "disk_latency_critical": 100,
+    # write latency is only shown while the instance writes at least this
+    # much (MiB/s): with a few writes it is noise
+    "latency_min_write_mib": 1,
+}
+
+#: Default shortest window of the project Instance metrics rate() calls.
+#: Must hold at least two samples: at least twice the Ceilometer polling
+#: interval (300 s by default).
+DEFAULT_PROJECT_INSTANCE_METRICS_RATE_WINDOW = "10m"
+
+
+def get_project_instance_metrics_thresholds():
+    """
+    Get the project Instance metrics thresholds.
+
+    Override per key with
+    ``GRIAN_PLUGIN['project_instance_metrics_thresholds']``.
+    """
+    return get_thresholds(
+        "project_instance_metrics_thresholds",
+        DEFAULT_PROJECT_INSTANCE_METRICS_THRESHOLDS,
+    )
+
+
+def get_project_instance_metrics_rate_window():
+    """
+    Get the shortest window of the Instance metrics rate() calls.
+
+    Override with ``GRIAN_PLUGIN['project_instance_metrics_rate_window']``
+    (minutes or hours, from 1m to 6h, e.g. ``"10m"``). Longer ranges use
+    their chart step when it is longer. Use at least twice the Ceilometer
+    polling interval.
+
+    Raises:
+        ConfigurationError: If the value is not a valid window
+    """
+    value = _get_grian_plugin_config().get(
+        "project_instance_metrics_rate_window",
+        DEFAULT_PROJECT_INSTANCE_METRICS_RATE_WINDOW,
+    )
+    minutes = None
+    if (
+        isinstance(value, str)
+        and len(value) >= 2
+        and value[-1] in "mh"
+        and value[:-1].isascii()
+        and value[:-1].isdigit()
+        and not value.startswith("0")
+    ):
+        minutes = int(value[:-1]) * (60 if value[-1] == "h" else 1)
+    if minutes is None or minutes > 360:
+        raise ConfigurationError(
+            "GRIAN_PLUGIN['project_instance_metrics_rate_window'] must be a "
+            "duration in minutes or hours up to 6h, such as '10m', got "
+            f"{value!r}"
+        )
+    return value

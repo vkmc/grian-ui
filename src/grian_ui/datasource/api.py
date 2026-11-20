@@ -61,3 +61,33 @@ class DatasourceClient(ABC):
     def get_capacity_predictions(self) -> list:
         """Get capacity predictions for storage pools."""
         pass
+
+    # Project instance metrics (see grian_ui.project_instance_metrics) -----
+
+    @abstractmethod
+    def get_project_instance_metrics(
+        self,
+        project_matcher,
+        group,
+        instance_id,
+        range_key,
+        min_rate_window,
+        at=None,
+    ) -> dict:
+        """
+        Get the time series of one chart group of one instance.
+
+        Args:
+            project_matcher: grian_ui.project.project_matcher(request), the
+                current project, put in every selector
+            group: one of grian_ui.project_instance_metrics.GROUPS
+            instance_id: server UUID
+            range_key: one of grian_ui.timeseries.RANGES
+            min_rate_window: shortest rate() window, e.g. ``"10m"``
+            at: evaluation time (epoch seconds), or None for now
+
+        Returns:
+            dict: ``{series: [[timestamp, value], ...]}`` with every
+            series of the group (see project_instance_metrics.SERIES)
+        """
+        pass

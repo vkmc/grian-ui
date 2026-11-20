@@ -1,0 +1,363 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load static %}
+{% block title %}{% if server %}{{ server.name }} – {% endif %}{% trans "Instance metrics" %}{% endblock %}
+
+{% block page_header %}
+<div class="page-header im-header">
+  <ol class="breadcrumb im-breadcrumb">
+    <li>{% trans "Telemetry" %}</li>
+    {% if compute_url %}<li><a href="{{ compute_url }}">{% trans "Compute" %}</a></li>{% endif %}
+    {% if server %}<li class="active">{{ server.name }}</li>{% endif %}
+  </ol>
+  <div class="im-title">
+    <h1>{% trans "Instance metrics" %}</h1>
+    {% if servers %}
+    {# a plain GET form: works without script; the script submits on change #}
+    <form method="get" id="im-picker-form" class="form-inline">
+      <label class="sr-only" for="im-picker">{% trans "Instance" %}</label>
+      <select name="instance" id="im-picker" class="form-control input-sm">
+        {% if not picked %}<option value="" selected>{% trans "Choose an instance…" %}</option>{% endif %}
+        {% for s in servers %}
+        <option value="{{ s.id }}"{% if s.id == instance_id %} selected{% endif %}>{{ s.name }}{% if s.status != "ACTIVE" %} ({{ s.status }}){% endif %}</option>
+        {% endfor %}
+      </select>
+      {% if range %}<input type="hidden" name="range" id="im-picker-range" value="{{ range }}">{% endif %}
+      <noscript><button type="submit" class="btn btn-default btn-sm">{% trans "Show" %}</button></noscript>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock page_header %}
+
+{% block main %}
+<!-- HTMX -->
+<script src="{% static 'vendor/htmx.js' %}"></script>
+<!-- Chart.js -->
+<script src="{% static 'vendor/chart.umd.js' %}"></script>
+
+<style>
+.im-header .im-breadcrumb { background: none; padding: 0; margin-bottom: 5px; }
+.im-header .im-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 15px; }
+.im-header .im-title h1 { margin: 0; }
+.im-section { margin-bottom: 15px; }
+.im-toolbar { margin-bottom: 15px; }
+.im-muted { color: #595959; font-size: 12px; }
+.im-loading { padding: 25px; text-align: center; color: #595959; }
+.im-kv td { padding: 2px 14px 2px 0; vertical-align: top; }
+.im-kv td.im-key { color: #595959; }
+.im-kv td.im-key + td { padding-right: 24px; }
+.im-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.im-tiles { display: flex; flex-wrap: wrap; gap: 10px; }
+.im-tile { flex: 1 1 150px; background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 10px 12px; }
+.im-tile .im-tile-label { font-weight: 600; }
+.im-tile .im-tile-value { font-size: 1.8em; font-weight: 300; line-height: 1.1; }
+.im-tile .im-tile-value small { font-size: .5em; color: #595959; }
+.im-tile .im-tile-sub { font-size: 11px; color: #595959; }
+.im-chart { position: relative; height: 180px; }
+.im-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; margin-bottom: 4px; }
+.im-legend .im-ln { display: inline-block; width: 16px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
+.im-legend .im-ln.im-dash { border-top-style: dashed; }
+.im-legend .im-color-blue { border-color: #337ab7; }
+.im-legend .im-color-magenta { border-color: #b0417a; }
+.im-legend .im-color-grey { border-color: #999999; }
+.im-legend .im-color-warning { border-color: #f0ad4e; }
+.im-legend .im-color-critical { border-color: #d9534f; }
+/* chart groups: their boxes flow in one row, two per line */
+.im-charts-row { display: flex; flex-wrap: wrap; }
+.im-charts-row::before, .im-charts-row::after { display: none; }
+.im-charts-row > .im-group { display: contents; }
+.im-charts-row > .im-group > [class*="col-"] { width: 100%; }
+@media (min-width: 992px) { .im-charts-row > .im-group > [class*="col-"] { width: 50%; } }
+.im-empty { padding: 30px 20px; text-align: center; color: #595959; }
+.im-empty > .fa { font-size: 3em; opacity: .5; display: block; margin-bottom: 10px; }
+/* pressed buttons: the theme's #e6e6e6 is 1.3:1 and equals the hover */
+#im-root .btn-group .btn.active { background-color: #1a4f80; border-color: #1a4f80; color: #fff; font-weight: 600; }
+/* the default theme's .text-muted (#bbb) is 1.9:1 on white */
+#im-root .text-muted { color: #595959; }
+#im-root .text-warning { color: #6b4f1d; }
+#im-root .text-danger { color: #a94442; }
+/* how this page is calculated */
+.im-how > summary { cursor: pointer; }
+.im-how > summary .panel-title { display: inline; }
+.im-how-table th, .im-how-table td { padding: 3px 12px 3px 0; vertical-align: top; }
+.im-how-table th[scope="row"] { white-space: nowrap; }
+</style>
+
+<script>
+window.im = window.im || {};
+im.charts = im.charts || {};
+// Series colours of the Project mockups: blue for "used", "read", "in";
+// magenta for "write", "out" (checked with the palette validator: CVD
+// separation 10.7, contrast at least 3:1). Dashed reference lines: grey
+// for the flavor, Bootstrap warning and danger for the thresholds.
+im.colors = { blue: '#337ab7', magenta: '#b0417a', grey: '#999999', warning: '#f0ad4e', critical: '#d9534f' };
+im.fill = 'rgba(51,122,183,.12)';
+im.readJson = function (id) {
+  var el = document.getElementById(id);
+  return el ? JSON.parse(el.textContent) : null;
+};
+im.formatBytes = function (v) {
+  var units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'], i = 0;
+  while (Math.abs(v) >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 || Math.abs(v) >= 100 ? Math.round(v) : +v.toFixed(v >= 10 ? 1 : 2)) + ' ' + units[i];
+};
+im.formatValue = function (v, unit) {
+  if (v === null || v === undefined) { return '–'; }
+  if (unit === 'cores') { return +v.toFixed(v < 10 ? 2 : 1) + ' vCPU'; }
+  if (unit === 'percent') { return +v.toFixed(v < 1 ? 1 : 0) + '%'; }
+  if (unit === 'mib') { return im.formatBytes(v * 1048576); }
+  if (unit === 'ms') { return +v.toFixed(1) + ' ms'; }
+  return im.formatBytes(v) + '/s';
+};
+im.formatTick = function (v, unit) {
+  if (unit === 'cores') { return +v.toFixed(2); }
+  if (unit === 'percent') { return v + '%'; }
+  return im.formatValue(v, unit);
+};
+// Browser-local times
+im.formatTime = function (ts, range) {
+  var d = new Date(ts * 1000);
+  if (range === '7d') {
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+im.formatClock = function (ts) {
+  return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+im.formatDateTime = function (ts) {
+  return new Date(ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+im.showClocks = function (root) {
+  if (!root) { return; }
+  root.querySelectorAll('.im-clock').forEach(function (el) {
+    var ts = parseInt(el.getAttribute('data-ts'), 10);
+    el.textContent = el.hasAttribute('data-date') ? im.formatDateTime(ts) : im.formatClock(ts);
+  });
+};
+// One chart per key: a new response replaces the previous chart.
+im.replaceChart = function (key, canvas, config) {
+  if (im.charts[key]) { im.charts[key].destroy(); }
+  im.charts[key] = canvas ? new Chart(canvas, config) : null;
+};
+im.destroyCharts = function (prefix) {
+  Object.keys(im.charts).forEach(function (key) {
+    if (key.indexOf(prefix) === 0 && im.charts[key]) { im.charts[key].destroy(); delete im.charts[key]; }
+  });
+};
+// Draw the charts of one group from its json_script data.
+im.drawGroup = function (group, uid) {
+  var d = im.readJson('im-data-' + uid);
+  if (!d) { return; }
+  im.destroyCharts(group + ':');
+  var labels = d.timestamps.map(function (t) { return im.formatTime(t, d.range); });
+  d.charts.forEach(function (c) {
+    var canvas = document.getElementById('im-canvas-' + uid + '-' + c.key);
+    if (!canvas || !c.has_data) { return; }
+    canvas.setAttribute('aria-label', c.label + ' – ' + d.instance);
+    var datasets = c.datasets.map(function (s) {
+      var color = im.colors[s.color];
+      return s.dash ?
+        { label: s.label, data: s.values, borderColor: color, borderDash: [5, 4], borderWidth: 1,
+          pointRadius: 0, pointHoverRadius: 0, fill: false, spanGaps: true, stepped: true } :
+        { label: s.label, data: s.values, borderColor: color, backgroundColor: s.fill ? im.fill : color,
+          fill: s.fill ? 'origin' : false, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4,
+          tension: .25, spanGaps: false };
+    });
+    im.replaceChart(group + ':' + c.key, canvas, {
+      type: 'line',
+      data: { labels: labels, datasets: datasets },
+      options: {
+        maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ': ' + im.formatValue(ctx.parsed.y, c.unit); } } } },
+        scales: {
+          y: { min: 0, max: c.max === null ? undefined : c.max,
+            ticks: { maxTicksLimit: 5, callback: function (v) { return im.formatTick(v, c.unit); } }, grid: { color: '#f0f0f0' } },
+          x: { ticks: { maxTicksLimit: 6, autoSkip: true }, grid: { display: false } }
+        }
+      }
+    });
+  });
+};
+im.pressed = function (groupId, attr, value) {
+  document.querySelectorAll('#' + groupId + ' button').forEach(function (b) {
+    var active = b.getAttribute(attr) === value;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+};
+// Change the range of every chart; kept in the address so a reload (or
+// the picker) keeps it.
+im.setRange = function (range) {
+  document.getElementById('im-range').value = range;
+  var picker = document.getElementById('im-picker-range');
+  if (picker) { picker.value = range; }
+  im.pressed('im-range-buttons', 'data-range', range);
+  if (window.history && history.replaceState) {
+    var url = new URL(window.location.href);
+    url.searchParams.set('range', range);
+    history.replaceState(null, '', url.toString());
+  }
+  htmx.trigger(document.body, 'im-change');
+};
+im.text = {
+  notRefreshed: '{% filter escapejs %}{% trans "Could not be refreshed: showing the last data received." %}{% endfilter %}',
+  notLoaded: '{% filter escapejs %}{% trans "Could not be loaded: trying again at the next refresh." %}{% endfilter %}'
+};
+// htmx keeps the old content when a request fails (5xx, network error):
+// say so in the section, until its next successful swap replaces it
+im.markNotRefreshed = function (target, text) {
+  var note = target.querySelector(':scope > .im-not-refreshed');
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'text-warning im-not-refreshed';
+    note.style.margin = '0 0 6px';
+    target.insertBefore(note, target.firstChild);
+  }
+  note.textContent = '';
+  var icon = document.createElement('i');
+  icon.className = 'fa fa-exclamation-triangle';
+  icon.setAttribute('aria-hidden', 'true');
+  note.appendChild(icon);
+  note.appendChild(document.createTextNode(' ' + text));
+};
+['htmx:sendError', 'htmx:responseError'].forEach(function (name) {
+  document.body.addEventListener(name, function (e) {
+    var target = e.detail.target;
+    // expired session: Horizon answers 401 to AJAX requests
+    if (e.detail.xhr && e.detail.xhr.status === 401) { window.location.reload(); return; }
+    if (target && target.closest && target.closest('#im-root')) {
+      im.markNotRefreshed(target, target.querySelector('.im-loading, [data-im-nodata]') ?
+        im.text.notLoaded : im.text.notRefreshed);
+    }
+  });
+});
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') { htmx.trigger(document.body, 'im-refresh'); }
+});
+document.addEventListener('DOMContentLoaded', function () {
+  var picker = document.getElementById('im-picker');
+  if (picker) {
+    picker.addEventListener('change', function () { if (picker.value) { picker.form.submit(); } });
+  }
+});
+</script>
+
+<div id="im-root" hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
+{% for message in error_messages %}
+<div class="alert alert-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ message }}</div>
+{% endfor %}
+
+{% if not error_messages %}
+{% if picker_error %}
+<div class="alert alert-warning"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not list the instances of this project. See the Horizon logs for details." %}</div>
+{% elif picker_more %}
+<p class="im-muted">{% blocktrans count n=picker_more %}The list shows the first instances by name; {{ n }} more is not listed. Open an instance from the Compute page instead.{% plural %}The list shows the first instances by name; {{ n }} more are not listed. Open an instance from the Compute page instead.{% endblocktrans %}</p>
+{% endif %}
+
+{% if invalid %}
+<div class="alert alert-danger" data-im-invalid><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {% trans "Invalid instance ID. Choose an instance in the list." %}</div>
+{% elif error_message %}
+<div class="alert {% if not_found %}alert-warning{% else %}alert-danger{% endif %}" data-im-nodata><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ error_message }}{% if not_found %} {% trans "Choose an instance in the list." %}{% endif %}</div>
+{% elif not instance_id %}
+<div class="panel panel-default"><div class="panel-body im-empty">
+  <i class="fa fa-line-chart" aria-hidden="true"></i>
+  {% if servers %}
+  <h4>{% trans "Choose an instance" %}</h4>
+  <p>{% trans "Pick an instance in the list next to the title, or click an instance name on the Compute, Network or Usage page." %}</p>
+  {% elif not picker_error %}
+  <h4>{% trans "No instances in this project" %}</h4>
+  <p>{% trans "Instance metrics are shown for the instances of the current project." %}</p>
+  {% endif %}
+</div></div>
+{% else %}
+<!-- Shared request parameters for the partials -->
+<form id="im-controls" onsubmit="return false;">
+  <input type="hidden" name="instance" value="{{ instance_id }}">
+  <input type="hidden" name="range" id="im-range" value="{{ range }}">
+</form>
+
+<div class="row im-toolbar">
+  <div class="col-sm-8">
+    <div class="btn-group btn-group-sm" role="group" aria-label="{% trans 'Time range' %}" id="im-range-buttons">
+      {% for r in ranges %}
+      <button type="button" class="btn btn-default{% if r == range %} active{% endif %}"
+              data-range="{{ r }}" aria-pressed="{% if r == range %}true{% else %}false{% endif %}"
+              onclick="im.setRange('{{ r }}')">{{ r }}</button>
+      {% endfor %}
+    </div>
+    <span class="im-muted" style="margin-left: 8px;">{% blocktrans with r=tile_range %}Range of the charts. The tiles always show the latest values (last {{ r }}).{% endblocktrans %}</span>
+  </div>
+  <div class="col-sm-4 text-right im-muted" style="line-height: 30px;">
+    <i class="fa fa-refresh" aria-hidden="true"></i>
+    {% blocktrans with seconds=refresh_seconds %}Refreshes every {{ seconds }}s{% endblocktrans %}
+  </div>
+</div>
+
+<!-- 1. The instance: status, flavor, addresses, links (or why there are no metrics) -->
+<div id="im-info" class="im-section"
+     hx-get="{% url 'horizon:project:instance_metrics:info' %}"
+     hx-include="#im-controls"
+     hx-sync="this:replace"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], im-refresh from:body, im-retry, im-change from:body"
+     hx-swap="innerHTML">
+  <div class="panel panel-default"><div class="im-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+</div>
+
+<!-- 2. Current values -->
+<div id="im-tiles" class="im-section"
+     hx-get="{% url 'horizon:project:instance_metrics:tiles' %}"
+     hx-include="#im-controls"
+     hx-sync="this:replace"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], im-refresh from:body, im-retry"
+     hx-swap="innerHTML">
+  <div class="im-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+</div>
+
+<!-- 3. Charts, one partial (and one query) per group -->
+<div class="row im-charts-row">
+{% for group in groups %}
+<div id="im-charts-{{ group }}" class="im-group im-group-{{ group }}"
+     hx-get="{% url 'horizon:project:instance_metrics:charts' group %}"
+     hx-include="#im-controls"
+     hx-sync="this:replace"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], im-refresh from:body, im-retry, im-change from:body"
+     hx-swap="innerHTML">
+  <div class="col-md-6"><div class="panel panel-default"><div class="im-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div></div>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+
+{% if project_instance_metrics_thresholds %}
+{% with thr=project_instance_metrics_thresholds %}
+{# A native disclosure: keyboard and screen reader support without script. #}
+<details class="panel panel-default im-section im-how" id="im-how">
+  <summary class="panel-heading"><h3 class="panel-title"><i class="fa fa-sliders" aria-hidden="true"></i> {% trans "How this page is calculated" %} <small class="text-muted">{% trans "(click to expand)" %}</small></h3></summary>
+  <div class="panel-body">
+    <table class="im-how-table im-muted">
+      <tr><th scope="col">{% trans "Item" %}</th><th scope="col">{% trans "Source, query or rule" %}</th></tr>
+      <tr><th scope="row">{% trans "Instance list" %}</th><td>{% trans "Compute API, with your token: the instances of the current project, and the status, flavor and addresses of this one. An instance of another project is refused, also for administrators." %}</td></tr>
+      <tr><th scope="row">{% trans "CPU used" %}</th><td>{% trans "<code>rate(ceilometer_cpu{…}[w]) / 1e9</code>: vCPUs busy. Dashed line: <code>ceilometer_vcpus</code> (the flavor's vCPUs)." %}</td></tr>
+      <tr><th scope="row">{% trans "CPU wait" %}</th><td>{% blocktrans with w=thr.cpu_wait_warning c=thr.cpu_wait_critical %}<code>rate(ceilometer_cpu_delay{…}[w]) / 1e9</code> ÷ vCPUs. Warning {{ w }}%, critical {{ c }}%.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Memory used" %}</th><td>{% trans "<code>ceilometer_memory_usage</code> against <code>ceilometer_memory</code> (flavor RAM). Swap: <code>rate(ceilometer_memory_swap_{in,out}[w])</code>." %}</td></tr>
+      <tr><th scope="row">{% trans "Disk throughput" %}</th><td>{% trans "<code>rate(ceilometer_disk_device_{read,write}_bytes[w])</code>, summed over the instance's disks." %}</td></tr>
+      <tr><th scope="row">{% trans "Disk latency" %}</th><td>{% blocktrans with w=thr.disk_latency_warning c=thr.disk_latency_critical floor=thr.latency_min_write_mib %}<code>rate(…_write_latency[w]) ÷ rate(…_write_requests[w])</code>, in ms. Shown only while the instance writes at least {{ floor }} MiB/s. Warning {{ w }} ms, critical {{ c }} ms.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Network traffic" %}</th><td>{% trans "<code>rate(ceilometer_network_{incoming,outgoing}_bytes[w])</code>, summed over the instance's interfaces." %}</td></tr>
+      <tr><th scope="row">{% trans "Time series" %}</th><td>{% blocktrans with steps=range_steps|join:"; " %}Aetos has no <code>query_range</code>: each group of charts is one instant query with a subquery, e.g. <code>(…)[24h:15m]</code> ({{ steps }}).{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Polled samples only" %}</th><td>{% blocktrans %}<code>{…}</code> holds the current project and this instance. Instance and disk meters also need <code>resource_name=~".+:instance-.+"</code>: Nova notifications publish the same meters with a plain name, and would count the instance twice.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "History" %}</th><td>{% blocktrans count days=metrics_retention_days %}Metrics are kept for {{ days }} day: longer ranges are not offered.{% plural %}Metrics are kept for {{ days }} days: longer ranges are not offered.{% endblocktrans %}</td></tr>
+    </table>
+    <p class="im-muted" style="margin: 8px 0 0;">{% blocktrans %}Thresholds can be overridden in <code>local_settings</code> with <code>GRIAN_PLUGIN['project_instance_metrics_thresholds']</code>, the shortest rate window with <code>GRIAN_PLUGIN['project_instance_metrics_rate_window']</code>.{% endblocktrans %}</p>
+  </div>
+</details>
+{% endwith %}
+{% endif %}
+{% endif %}
+</div>
+
+{% endblock %}

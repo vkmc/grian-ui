@@ -99,6 +99,21 @@ class FakeTelemetryClient(DatasourceClient):
             },
         ]
 
+    def get_project_instance_metrics(
+        self,
+        project_matcher,
+        group,
+        instance_id,
+        range_key,
+        min_rate_window,
+        at=None,
+    ) -> dict:
+        from grian_ui.datasource import fake_project_instance_metrics
+
+        return fake_project_instance_metrics.get_instance_metrics(
+            group, instance_id, range_key, at=at
+        )
+
 
 def get_client(request=None) -> DatasourceClient:
     """

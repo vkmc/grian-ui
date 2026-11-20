@@ -352,6 +352,27 @@ class PrometheusTelemetryClient(DatasourceClient):
             series.append((result.get("metric", {}), points))
         return series
 
+    def get_project_instance_metrics(
+        self,
+        project_matcher,
+        group,
+        instance_id,
+        range_key,
+        min_rate_window,
+        at=None,
+    ) -> dict:
+        from grian_ui.datasource import prometheus_project_instance_metrics
+
+        return prometheus_project_instance_metrics.get_instance_metrics(
+            self,
+            project_matcher,
+            group,
+            instance_id,
+            range_key,
+            min_rate_window,
+            at=at,
+        )
+
 
 def get_client(request) -> DatasourceClient:
     """

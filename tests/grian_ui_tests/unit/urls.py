@@ -13,6 +13,9 @@ Add each Admin panel's URLs to ``PANELS`` and each Project panel's URLs to
 from django.urls import include
 from django.urls import path
 
+from grian_ui.content.project_instance_metrics import (
+    urls as project_instance_metrics_urls,
+)
 from grian_ui.content.volume_metrics import urls as volume_metrics_urls
 
 
@@ -20,7 +23,9 @@ PANELS = {
     "volume_metrics": volume_metrics_urls,
 }
 
-PROJECT_PANELS = {}
+PROJECT_PANELS = {
+    "instance_metrics": project_instance_metrics_urls,
+}
 
 
 def _dashboard(panels, name):

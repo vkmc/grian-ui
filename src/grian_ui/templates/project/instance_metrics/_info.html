@@ -1,0 +1,56 @@
+{% load i18n %}
+{% if error_message %}
+<div data-im-nodata class="alert {% if loading %}alert-info{% elif not_found %}alert-warning{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "project/instance_metrics/_retry.html" %}
+{% else %}
+<div class="panel panel-default" style="margin-bottom: 0;"><div class="panel-body">
+  <div class="row">
+    <div class="col-md-8">
+      <table class="im-kv">
+        <tr>
+          <td class="im-key">{% trans "Status" %}</td>
+          <td><span class="im-sw" style="background: {% if state == 'active' %}#5cb85c{% elif state == 'error' %}#d9534f{% else %}#999999{% endif %};" aria-hidden="true"></span>{{ server.status }}</td>
+          <td class="im-key">{% trans "Flavor" %}</td>
+          <td><strong>{{ server.flavor.name|default:_("unknown") }}</strong>{% if server.flavor.vcpus %} | {% blocktrans count n=server.flavor.vcpus %}{{ n }} vCPU{% plural %}{{ n }} vCPUs{% endblocktrans %}{% endif %}{% if ram %} | {% blocktrans %}{{ ram }} RAM{% endblocktrans %}{% endif %}{% if server.flavor.disk_gb %} | {% blocktrans with n=server.flavor.disk_gb %}{{ n }} GB disk{% endblocktrans %}{% endif %}</td>
+        </tr>
+        <tr>
+          <td class="im-key">{% trans "ID" %}</td>
+          <td><code>{{ server.id }}</code></td>
+          <td class="im-key">{% trans "Network" %}</td>
+          <td>{% for a in server.addresses %}{{ a.network }}{% if a.ips %} | {{ a.ips|join:", " }}{% endif %}{% if not forloop.last %}<br>{% endif %}{% empty %}–{% endfor %}</td>
+        </tr>
+      </table>
+    </div>
+    <div class="col-md-4 text-right">
+      {% if links.detail %}<a class="btn btn-sm btn-default" href="{{ links.detail }}"><i class="fa fa-external-link" aria-hidden="true"></i> {% trans "Instance details" %}</a>{% endif %}
+      {% if links.console and state == 'active' %}<a class="btn btn-sm btn-default" href="{{ links.console }}"><i class="fa fa-terminal" aria-hidden="true"></i> {% trans "Console" %}</a>{% endif %}
+      {% if links.resize %}<a class="btn btn-sm btn-default ajax-modal" href="{{ links.resize }}"><i class="fa fa-arrows-alt" aria-hidden="true"></i> {% trans "Resize…" %}</a>{% endif %}
+    </div>
+  </div>
+  {% if state == 'active' and coverage %}
+  <p class="im-muted" style="margin: 8px 0 0;"><i class="fa fa-info-circle" aria-hidden="true"></i>
+    {% blocktrans with ts=coverage.created_at range=range count hours=coverage.hours %}This instance was created on <span class="im-clock" data-date data-ts="{{ ts }}"></span>, so the last {{ range }} hold at most {{ hours }} hour of data.{% plural %}This instance was created on <span class="im-clock" data-date data-ts="{{ ts }}"></span>, so the last {{ range }} hold at most {{ hours }} hours of data.{% endblocktrans %}</p>
+  {% endif %}
+  {% if data_stale %}<p class="text-warning" style="margin: 8px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "The Compute API could not be reached: showing the last status received." %}</p>{% endif %}
+</div></div>
+
+{% if state != 'active' %}
+<div class="panel panel-default" style="margin: 15px 0 0;"><div class="panel-body im-empty" data-im-state="{{ state }}">
+  {% if state == 'error' %}<i class="fa fa-exclamation-circle text-danger" aria-hidden="true"></i>{% elif state == 'shutoff' %}<i class="fa fa-power-off" aria-hidden="true"></i>{% else %}<i class="fa fa-pause-circle-o" aria-hidden="true"></i>{% endif %}
+  <h4>{% trans "No metrics for this instance" %}</h4>
+  <p>
+  {% if state == 'error' %}
+    {% trans "It is in ERROR state." %}{% if server.fault %} {% trans "Fault:" %} <em>{{ server.fault }}</em><br>{% endif %}
+    {% if server.flavor.vcpus and ram %}{% blocktrans count n=server.flavor.vcpus %}It still counts against your quota: {{ n }} vCPU and {{ ram }} RAM.{% plural %}It still counts against your quota: {{ n }} vCPUs and {{ ram }} RAM.{% endblocktrans %}{% else %}{% trans "It still counts against your quota." %}{% endif %}
+  {% elif state == 'shutoff' %}
+    {% blocktrans with status=server.status count days=retention_days %}It is {{ status }}. Metrics stop when an instance stops; the history from when it ran is kept for {{ days }} day.{% plural %}It is {{ status }}. Metrics stop when an instance stops; the history from when it ran is kept for {{ days }} days.{% endblocktrans %}
+  {% else %}
+    {% blocktrans with status=server.status %}Its status is {{ status }}. Metrics are shown while it is active (running).{% endblocktrans %}
+  {% endif %}
+  </p>
+  {% if compute_url and state != 'other' %}<p><a href="{{ compute_url }}">{% trans "See it under “Holding quota without running” on the Compute page" %}</a></p>{% endif %}
+</div></div>
+<script>im.destroyCharts('');</script>
+{% endif %}
+<script>im.showClocks(document.getElementById('im-info'));</script>
+{% endif %}

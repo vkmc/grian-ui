@@ -1,0 +1,15 @@
+---
+features:
+  - |
+    Add the Instance metrics page under Project > Telemetry: CPU, CPU wait,
+    memory, disk throughput and write latency, and network traffic of one
+    instance of the current project, now (tiles) and over 1 hour to 7 days
+    (charts). It is not in the sidebar: other Telemetry pages link to it with
+    ``?instance=<server uuid>``, and a picker switches instance. Instances
+    that are not running show why there are no metrics (ERROR fault and the
+    quota still held, or shut off). The instance must belong to the current
+    project, also for administrators. Thresholds can be configured with
+    ``GRIAN_PLUGIN['project_instance_metrics_thresholds']`` and the shortest
+    rate window with ``GRIAN_PLUGIN['project_instance_metrics_rate_window']``.
+    The panel needs ``_1000_admin_telemetry_panel_group.py`` (it adds the
+    ``grian_ui`` application) and the Project Telemetry panel group.
