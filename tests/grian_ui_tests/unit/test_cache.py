@@ -62,6 +62,52 @@ class CacheKeyTests(base.TestCase):
         self.assertIn(":fake:", key)
 
 
+class ProjectCacheKeyTests(base.TestCase):
+    def _request(self, project_id, region="RegionOne"):
+        request = mock.MagicMock()
+        request.user.services_region = region
+        request.user.project_id = project_id
+        return request
+
+    def test_projects_get_different_keys(self):
+        keys = {
+            grian_cache.project_cache_key(self._request(p), "panel", "x")
+            for p in ("a" * 32, "b" * 32)
+        }
+        self.assertEqual(len(keys), 2)
+
+    def test_never_equals_the_region_wide_key(self):
+        request = self._request("a" * 32)
+        self.assertNotEqual(
+            grian_cache.project_cache_key(request, "panel", "x"),
+            grian_cache.cache_key(request, "panel", "x"),
+        )
+
+    def test_key_layout(self):
+        key = grian_cache.project_cache_key(
+            self._request("0123abcd"), "panel", "snap", version=2
+        )
+        self.assertEqual(
+            key, "grian_ui:panel:v2:snap:fake:RegionOne:project:0123abcd"
+        )
+
+    def test_odd_project_ids_are_key_safe_and_distinct(self):
+        keys = {
+            grian_cache.project_cache_key(self._request(p), "panel", "x")
+            for p in ("a b", "a_b")
+        }
+        self.assertEqual(len(keys), 2)
+        for key in keys:
+            self.assertNotIn(" ", key)
+
+    def test_missing_project_is_refused(self):
+        for project_id in (None, ""):
+            with self.assertRaises(ValueError):
+                grian_cache.project_cache_key(
+                    self._request(project_id), "panel", "x"
+                )
+
+
 class _CacheTestCase(base.TestCase):
     def setUp(self):
         super().setUp()

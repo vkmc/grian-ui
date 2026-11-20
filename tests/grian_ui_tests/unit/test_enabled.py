@@ -40,4 +40,28 @@ class EnabledFilesTests(base.TestCase):
         for name, module in _enabled_files():
             if hasattr(module, "PANEL"):
                 self.assertEqual(module.PANEL_GROUP, "telemetry", name)
-                self.assertEqual(module.PANEL_DASHBOARD, "admin", name)
+                self.assertEqual(
+                    module.PANEL_DASHBOARD, _dashboard_of(name), name
+                )
+
+    def test_panel_groups(self):
+        groups = {
+            name: module.PANEL_GROUP_DASHBOARD
+            for name, module in _enabled_files()
+            if hasattr(module, "PANEL_GROUP_DASHBOARD")
+        }
+        self.assertEqual(
+            groups,
+            {
+                "_1000_admin_telemetry_panel_group": "admin",
+                "_1100_project_telemetry_panel_group": "project",
+            },
+        )
+        group = dict(_enabled_files())["_1100_project_telemetry_panel_group"]
+        self.assertEqual(group.PANEL_GROUP, "telemetry")
+        self.assertEqual(group.PANEL_GROUP_NAME, "Telemetry")
+
+
+def _dashboard_of(name):
+    # _10xx files are Admin panels, _11xx files Project panels
+    return "project" if name.startswith("_11") else "admin"

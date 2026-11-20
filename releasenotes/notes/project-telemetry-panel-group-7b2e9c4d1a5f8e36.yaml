@@ -1,0 +1,13 @@
+---
+features:
+  - |
+    A Telemetry panel group is added to the Project dashboard, for panels
+    that show the current project's own resources. Copy
+    ``_1100_project_telemetry_panel_group.py`` to Horizon's ``enabled``
+    directory together with ``_1000_admin_telemetry_panel_group.py``, which
+    adds the ``grian_ui`` app for both groups.
+  - |
+    New setting ``GRIAN_PLUGIN['metrics_retention_days']`` (default 15, the
+    Prometheus default): how many days of metric history the backend keeps.
+    Project panels that look back days or months use it to say how much
+    history exists, because project users cannot read it from Aetos.

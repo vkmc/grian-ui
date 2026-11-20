@@ -199,3 +199,27 @@ class CacheMaxItemBytesTests(base.TestCase):
                 self._get,
                 cache_max_item_bytes=value,
             )
+
+
+class MetricsRetentionDaysTests(base.TestCase):
+    def _get(self, **values):
+        with mock.patch(
+            "grian_ui.config._get_grian_plugin_config",
+            return_value=dict({"datasource": "fake"}, **values),
+        ):
+            return config.get_metrics_retention_days()
+
+    def test_default(self):
+        self.assertEqual(self._get(), 15)
+
+    def test_override(self):
+        self.assertEqual(self._get(metrics_retention_days=400), 400)
+
+    def test_invalid(self):
+        for value in (0, -1, 1.5, "30", True, None):
+            self.assertRaisesRegex(
+                config.ConfigurationError,
+                "metrics_retention_days",
+                self._get,
+                metrics_retention_days=value,
+            )

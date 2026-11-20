@@ -173,6 +173,35 @@ def get_cache_max_item_bytes():
     return value
 
 
+#: Prometheus keeps 15 days of samples unless --storage.tsdb.retention.time
+#: says otherwise.
+DEFAULT_METRICS_RETENTION_DAYS = 15
+
+
+def get_metrics_retention_days():
+    """
+    Get how many days of metric history the backend keeps.
+
+    Project users cannot read the retention from Aetos (its status API is
+    admin-only), so pages that look back days or months read it from
+    ``GRIAN_PLUGIN['metrics_retention_days']`` to say how much history
+    exists. Set it to the Prometheus retention
+    (``--storage.tsdb.retention.time``).
+
+    Raises:
+        ConfigurationError: If the value is not a positive whole number
+    """
+    value = _get_grian_plugin_config().get(
+        "metrics_retention_days", DEFAULT_METRICS_RETENTION_DAYS
+    )
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ConfigurationError(
+            "GRIAN_PLUGIN['metrics_retention_days'] must be a positive "
+            f"whole number of days, got {value!r}"
+        )
+    return value
+
+
 def get_openstack_keystone_url():
     """Get OpenStack Keystone URL from settings."""
     url = getattr(settings, "OPENSTACK_KEYSTONE_URL", None)

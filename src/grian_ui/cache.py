@@ -335,6 +335,29 @@ def cache_key(request, namespace, name, version=1):
     )
 
 
+def project_cache_key(request, namespace, name, version=1):
+    """
+    Cache key for data of the request's current project.
+
+    Use this, never cache_key(), in the Project dashboard panels: their data
+    is scoped to one project, so the key holds the project ID and two
+    projects never share a value. Every member of the project shares it,
+    so only cache data computed for the project as a whole (queries
+    filtered with grian_ui.project.project_matcher(), API calls listing the
+    project's resources), never data that depends on the user.
+
+    Raises ValueError when the request has no current project.
+    """
+    project_id = getattr(request.user, "project_id", None)
+    if not project_id:
+        raise ValueError("the request has no current project")
+    return (
+        f"grian_ui:{_key_part(namespace)}:v{int(version)}:{_key_part(name)}:"
+        f"{config.get_datasource_type()}:{_region(request)}:"
+        f"project:{_key_part(project_id)}"
+    )
+
+
 def _checked(key, value):
     """
     Check the compute() contract; return the pickled size.
