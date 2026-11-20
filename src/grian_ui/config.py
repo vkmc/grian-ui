@@ -215,3 +215,47 @@ def get_openstack_keystone_url():
 def get_openstack_endpoint_type():
     """Get OpenStack endpoint type (interface) from settings."""
     return getattr(settings, "OPENSTACK_ENDPOINT_TYPE", "publicURL")
+
+
+#: Default Project -> Telemetry -> Storage thresholds: quota percentages
+#: (warning, critical), days before an unattached volume, an old snapshot
+#: or an unused private image is a clean-up candidate (an unattached volume
+#: is tagged "review" from ``unattached_review_days``), and days until a
+#: quota is full at which the forecast turns red or amber.
+DEFAULT_PROJECT_STORAGE_THRESHOLDS = {
+    "quota_warning": 75,
+    "quota_critical": 90,
+    "unattached_days": 7,
+    "unattached_review_days": 30,
+    "snapshot_age_days": 30,
+    "image_age_days": 30,
+    "forecast_critical_days": 14,
+    "forecast_warning_days": 30,
+}
+
+
+def get_project_storage_thresholds():
+    """
+    Get the Project Storage thresholds.
+
+    Defaults (DEFAULT_PROJECT_STORAGE_THRESHOLDS) can be overridden per key
+    with ``GRIAN_PLUGIN['project_storage_thresholds']``. See
+    get_thresholds(); in addition ``unattached_days`` must not be greater
+    than ``unattached_review_days``, and ``forecast_critical_days`` not
+    greater than ``forecast_warning_days`` (fewer days left is worse).
+
+    Raises:
+        ConfigurationError: If an override is unknown or out of range
+    """
+    setting = "project_storage_thresholds"
+    thresholds = get_thresholds(setting, DEFAULT_PROJECT_STORAGE_THRESHOLDS)
+    for low, high in (
+        ("unattached_days", "unattached_review_days"),
+        ("forecast_critical_days", "forecast_warning_days"),
+    ):
+        if thresholds[low] > thresholds[high]:
+            raise ConfigurationError(
+                f"GRIAN_PLUGIN['{setting}']['{low}'] must not be greater "
+                f"than '{high}'"
+            )
+    return thresholds

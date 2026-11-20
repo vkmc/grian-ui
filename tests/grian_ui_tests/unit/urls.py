@@ -13,6 +13,7 @@ Add each Admin panel's URLs to ``PANELS`` and each Project panel's URLs to
 from django.urls import include
 from django.urls import path
 
+from grian_ui.content.project_storage import urls as project_storage_urls
 from grian_ui.content.volume_metrics import urls as volume_metrics_urls
 
 
@@ -21,6 +22,7 @@ PANELS = {
 }
 
 PROJECT_PANELS = {}
+PROJECT_PANELS["telemetry_storage"] = project_storage_urls
 
 
 def _dashboard(panels, name):

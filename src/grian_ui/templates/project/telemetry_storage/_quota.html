@@ -1,0 +1,43 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-pie-chart" aria-hidden="true"></i> {% trans "Storage quota" %}
+    <span class="ps-src">{% trans "Block Storage API" %}</span><span class="ps-bounded">{% trans "4 rows" %}</span></h3></div>
+  <div class="panel-body">
+  {% if error_message %}
+  {% include "project/telemetry_storage/_error.html" %}
+  {% else %}
+  {% for row in rows %}
+  <div class="ps-quota-row">
+    <div class="ps-q-name">{{ row.label }}</div>
+    <div class="ps-q-bar" role="img" aria-label="{% if row.limit is not None %}{% blocktrans with name=row.label used=row.used limit=row.limit unit=row.unit %}{{ name }}: {{ used }} {{ unit }} of {{ limit }} {{ unit }} used{% endblocktrans %}{% else %}{% blocktrans with name=row.label used=row.used unit=row.unit %}{{ name }}: {{ used }} {{ unit }} used, no limit{% endblocktrans %}{% endif %}">
+      {% for seg in row.segments %}<span class="ps-{{ seg.key }}" style="flex: 0 0 {{ seg.width|stringformat:'s' }}%;" title="{{ seg.label }}: {{ seg.value }}{% if row.unit %} {{ row.unit }}{% endif %}"></span>{% endfor %}
+    </div>
+    <div class="ps-q-val">
+      <strong class="{% if row.level == 'critical' %}text-danger{% elif row.level == 'warning' %}text-warning{% endif %}">{{ row.used }}{% if row.unit %} {{ row.unit }}{% endif %}</strong>
+      / {% if row.limit is not None %}{{ row.limit }}{% if row.unit %} {{ row.unit }}{% endif %} <span class="text-muted">({{ row.percent }}%)</span>{% else %}<span class="text-muted">{% trans "no limit" %}</span>{% endif %}
+    </div>
+    <div class="ps-q-fc">
+      {% if row.key == "backups" %}
+        {% if not row.enabled %}<span class="text-muted" title="{% trans 'Horizon is not configured with a volume backup service (OPENSTACK_CINDER_FEATURES enable_backup)' %}">{% trans "Backup service not enabled" %}</span>{% endif %}
+      {% elif row.forecast %}{% with fc=row.forecast %}
+        {% if fc.state == "full" %}<span class="text-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {% trans "Full" %}</span>
+        {% elif fc.state == "no_history" %}<span class="text-muted" title="{% blocktrans count n=fc.history_days %}{{ n }} day of history{% plural %}{{ n }} days of history{% endblocktrans %}"><i class="fa fa-hourglass-half" aria-hidden="true"></i> {% trans "Not enough history" %}</span>
+        {% elif fc.state == "flat" %}<span class="text-success"><i class="fa fa-check" aria-hidden="true"></i> {% trans "Not growing" %}</span>
+        {% elif fc.state == "far" %}<span class="text-muted"><i class="fa fa-clock-o" aria-hidden="true"></i> {% trans "Full in more than a year" %}</span>
+        {% elif fc.state == "days" %}<span class="{% if fc.level == 'critical' %}text-danger{% elif fc.level == 'warning' %}text-warning{% else %}text-muted{% endif %}"><i class="fa {% if fc.level == 'critical' %}fa-exclamation-circle{% elif fc.level == 'warning' %}fa-exclamation-triangle{% else %}fa-clock-o{% endif %}" aria-hidden="true"></i> {% blocktrans count days=fc.days %}Full in ~{{ days }} day{% plural %}Full in ~{{ days }} days{% endblocktrans %}</span>
+        {% endif %}
+      {% endwith %}{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  <div class="ps-q-legend ps-muted">
+    <span><span class="ps-sw ps-attached"></span>{% trans "Attached volumes" %}</span>
+    <span><span class="ps-sw ps-unattached"></span>{% trans "Unattached volumes" %}</span>
+    <span><span class="ps-sw ps-snapshots"></span>{% trans "Snapshots" %}</span>
+  </div>
+  <p class="ps-muted" style="margin: 10px 0 0;">{% if forecast_days %}{% blocktrans count days=forecast_days %}Snapshots count against the same gigabytes quota as volumes. The forecast extends the trend of the last {{ days }} day.{% plural %}Snapshots count against the same gigabytes quota as volumes. The forecast extends the trend of the last {{ days }} days.{% endblocktrans %}{% else %}{% trans "Snapshots count against the same gigabytes quota as volumes." %}{% endif %}</p>
+  {% include "project/telemetry_storage/_notes.html" %}
+  <script>ps.showTimes(document.getElementById('ps-quota'));</script>
+  {% endif %}
+  </div>
+</div>

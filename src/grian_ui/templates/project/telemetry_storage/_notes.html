@@ -1,0 +1,13 @@
+{% load i18n %}
+{# Age of the data shown and optional data that is missing; "loading" retries the section shortly. #}
+{% if data_stale %}
+<p class="text-warning" style="margin: 6px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
+  {% blocktrans %}Could not be refreshed: showing the last data received, from <span class="ps-clock" data-ts="{{ fetched_ts }}"></span>.{% endblocktrans %}</p>
+{% elif data_old %}
+<p class="text-muted" style="margin: 6px 0 0;"><i class="fa fa-refresh" aria-hidden="true"></i>
+  {% blocktrans %}Refreshing: the data shown may be out of date (from <span class="ps-clock" data-ts="{{ fetched_ts }}"></span>).{% endblocktrans %}</p>
+{% endif %}
+{% for note in partial_notes %}
+<p class="{% if note.loading %}text-muted{% else %}text-warning{% endif %}" style="margin: 6px 0 0;"><i class="fa {% if note.loading %}fa-spinner fa-spin{% else %}fa-exclamation-triangle{% endif %}" aria-hidden="true"></i> {{ note.text }}</p>
+{% endfor %}
+{% include "project/telemetry_storage/_retry.html" %}

@@ -1,0 +1,37 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-hdd-o" aria-hidden="true"></i> {% trans "Volumes and snapshots" %} <span class="ps-bounded">{% blocktrans with n=limit %}max {{ n }} rows{% endblocktrans %}</span></h3></div>
+  {% if error_message %}
+  <div class="panel-body">{% include "project/telemetry_storage/_error.html" %}</div>
+  {% elif rows %}
+  <table class="table ps-table">
+    <thead><tr><th scope="col">{% trans "Name" %}</th><th scope="col">{% trans "Type" %}</th><th scope="col" class="text-right">{% trans "Size" %}</th><th scope="col">{% trans "Status / attached to" %}</th><th scope="col" class="text-right">{% trans "Age" %}</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{% if r.url %}<a class="ps-link" href="{{ r.url }}">{{ r.name }}</a>{% else %}<strong>{{ r.name }}</strong>{% endif %}</td>
+      <td>{% if r.kind == "volume" %}{% trans "Volume" %}{% else %}{% blocktrans with volume=r.volume_name %}Snapshot of {{ volume }}{% endblocktrans %}{% endif %}</td>
+      <td class="text-right">{% blocktrans with gb=r.size %}{{ gb }} GB{% endblocktrans %}</td>
+      <td>{% if r.kind == "volume" %}
+        {% if "error" in r.status %}<span class="ps-sw ps-error"></span><span class="text-danger">{{ r.status }}</span>{% for s in r.servers %}{% if forloop.first %} | {% else %}, {% endif %}{% if s.url %}<a class="ps-link" href="{{ s.url }}" title="{% trans 'Instance metrics' %}">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %}{% endfor %}
+        {% elif r.attached %}<span class="ps-sw ps-attached"></span>{{ r.status }}{% for s in r.servers %}{% if forloop.first %} | {% else %}, {% endif %}{% if s.url %}<a class="ps-link" href="{{ s.url }}" title="{% trans 'Instance metrics' %}">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %}{% endfor %}
+        {% elif r.status == "available" %}<span class="ps-sw ps-unattached"></span>{{ r.status }}{% if r.idle_days is not None %} <small class="text-muted">{% blocktrans with n=r.idle_days %}(unattached {{ n }} d){% endblocktrans %}</small>{% endif %}
+        {% else %}<span class="ps-sw ps-unattached"></span>{{ r.status }}{% endif %}
+      {% else %}<span class="ps-sw ps-snapshots"></span>{% if "error" in r.status %}<span class="text-danger">{{ r.status }}</span>{% else %}{{ r.status }}{% endif %}{% endif %}</td>
+      <td class="text-right">{% if r.age_days is not None %}{% blocktrans with n=r.age_days %}{{ n }} d{% endblocktrans %}{% else %}–{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if total > rows|length or partial_notes or data_stale or data_old %}
+  <div class="panel-footer ps-muted">
+    {% if total > rows|length %}{% blocktrans with shown=rows|length %}{{ shown }} of {{ total }} shown, largest first.{% endblocktrans %}{% endif %}
+    {% include "project/telemetry_storage/_notes.html" %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="panel-body ps-empty"><i class="fa fa-hdd-o fa-3x" aria-hidden="true"></i>{% trans "No volumes or snapshots." %}{% if create_url %} <a class="ps-link" href="{{ create_url }}">{% trans "Create a volume…" %}</a>{% endif %}
+    <div class="text-left">{% include "project/telemetry_storage/_notes.html" %}</div></div>
+  {% endif %}
+  <script>ps.showTimes(document.getElementById('ps-volumes'));</script>
+</div>

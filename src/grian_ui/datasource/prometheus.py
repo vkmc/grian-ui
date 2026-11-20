@@ -352,6 +352,26 @@ class PrometheusTelemetryClient(DatasourceClient):
             series.append((result.get("metric", {}), points))
         return series
 
+    # Project storage (queries in prometheus_project_storage) ------------
+
+    def get_project_storage_footprint(
+        self, project_matcher: str, days: int, at: float = None
+    ) -> dict:
+        from grian_ui.datasource import prometheus_project_storage
+
+        return prometheus_project_storage.get_footprint(
+            self, project_matcher, days, at=at
+        )
+
+    def get_project_storage_trend(
+        self, project_matcher: str, days: int, at: float = None
+    ) -> dict:
+        from grian_ui.datasource import prometheus_project_storage
+
+        return prometheus_project_storage.get_trend(
+            self, project_matcher, days, at=at
+        )
+
 
 def get_client(request) -> DatasourceClient:
     """

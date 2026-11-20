@@ -1,0 +1,18 @@
+---
+features:
+  - |
+    Add the Storage dashboard under Project > Telemetry. It shows the
+    current project's volume quota (gigabytes split into attached volumes,
+    unattached volumes and snapshots; volumes, snapshots and backups) with a
+    forecast of when each quota is full, the volume and snapshot footprint
+    over 7, 30 or 90 days, clean-up candidates (unattached volumes, old
+    snapshots, unused private images) and bounded inventories of volumes,
+    snapshots and private images. Data comes from the Block Storage, Compute
+    and Image APIs, read with the user's token, and from the Ceilometer
+    ``volume.size`` and ``volume.snapshot.size`` meters through Aetos, always
+    filtered on the current project. History never goes back further than
+    ``GRIAN_PLUGIN['metrics_retention_days']``, and the page says how much
+    exists. The thresholds can be configured with
+    ``GRIAN_PLUGIN['project_storage_thresholds']``. The panel needs the
+    ``_1000_admin_telemetry_panel_group.py`` and
+    ``_1100_project_telemetry_panel_group.py`` enabled files.

@@ -1,0 +1,30 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-trash-o" aria-hidden="true"></i> {% trans "Clean-up candidates" %} <span class="ps-bounded">{% blocktrans with n=limit %}max {{ n }} rows{% endblocktrans %}</span></h3></div>
+  {% if error_message %}
+  <div class="panel-body">{% include "project/telemetry_storage/_error.html" %}</div>
+  {% elif candidates %}
+  <table class="table ps-table">
+    <caption class="sr-only">{% trans "Clean-up candidates, most likely and largest first" %}</caption>
+    <tbody>
+    {% for c in candidates %}
+    <tr>
+      <td><i class="fa {% if c.kind == 'volume' %}fa-hdd-o{% elif c.kind == 'snapshot' %}fa-camera{% else %}fa-clone{% endif %} text-muted" aria-hidden="true"></i> <strong>{{ c.name }}</strong><br>
+        <small class="text-muted">{% if c.kind == 'volume' %}{% trans "Volume" %}{% elif c.kind == 'snapshot' %}{% trans "Snapshot" %}{% else %}{% trans "Image" %}{% endif %} | {{ c.reason }}</small></td>
+      <td class="text-right" style="white-space: nowrap;">{% blocktrans with gb=c.gb %}{{ gb }} GB{% endblocktrans %}{% if not c.in_quota %}<br><small class="text-muted">{% trans "not in quota" %}</small>{% endif %}</td>
+      <td class="text-right">{% if c.severity == 2 %}<span class="ps-tag ps-tag-review">{% trans "review" %}</span>{% elif c.severity == 1 %}<span class="ps-tag ps-tag-consider">{% trans "consider" %}</span>{% else %}<span class="ps-tag ps-tag-keep" title="{{ c.title }}">{% trans "keep?" %}</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="panel-footer ps-muted">
+    <i class="fa fa-info-circle" aria-hidden="true"></i> {% trans "Suggestions only. Check that nothing still needs the data before deleting it." %}
+    {% if total > candidates|length %}{% blocktrans with shown=candidates|length %}{{ shown }} of {{ total }} shown.{% endblocktrans %}{% endif %}
+    {% include "project/telemetry_storage/_notes.html" %}
+  </div>
+  {% else %}
+  <div class="panel-body ps-empty"><i class="fa fa-check-circle fa-3x text-success" aria-hidden="true"></i>{% trans "Nothing to clean up." %}
+    <div class="text-left">{% include "project/telemetry_storage/_notes.html" %}</div></div>
+  {% endif %}
+  <script>ps.showTimes(document.getElementById('ps-cleanup'));</script>
+</div>

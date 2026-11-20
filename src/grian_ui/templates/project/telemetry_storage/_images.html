@@ -1,0 +1,30 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-clone" aria-hidden="true"></i> {% trans "Private images" %} <span class="ps-src">{% trans "Image API" %}</span></h3></div>
+  {% if error_message %}
+  <div class="panel-body">{% include "project/telemetry_storage/_error.html" %}</div>
+  {% elif rows %}
+  <table class="table ps-table">
+    <thead><tr><th scope="col">{% trans "Image" %}</th><th scope="col" class="text-right">{% trans "Size" %}</th><th scope="col" class="text-right">{% trans "Used by" %}</th></tr></thead>
+    <tbody>
+    {% for i in rows %}
+    <tr>
+      <td><strong>{{ i.name }}</strong>{% if i.age_days is not None %}<br><small class="text-muted">{% blocktrans count n=i.age_days %}{{ n }} day old{% plural %}{{ n }} days old{% endblocktrans %}</small>{% endif %}</td>
+      <td class="text-right">{% blocktrans with gb=i.gb %}{{ gb }} GB{% endblocktrans %}</td>
+      <td class="text-right">{% if i.users is None %}<span class="text-muted">{% trans "unknown" %}</span>{% elif i.users %}{% blocktrans count n=i.users %}{{ n }} instance{% plural %}{{ n }} instances{% endblocktrans %}{% elif i.shared %}<span class="text-muted">{% trans "shared, use by other projects unknown" %}</span>{% else %}<span class="text-warning">{% trans "none" %}</span>{% endif %}{% if i.shared and i.users != 0 %}<br><small class="text-muted">{% trans "shared, use by other projects unknown" %}</small>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="panel-footer ps-muted">
+    {% blocktrans with gb=total_gb %}Total {{ gb }} GB in the image store.{% endblocktrans %}
+    {% if total > rows|length %}{% blocktrans with shown=rows|length %}{{ shown }} of {{ total }} shown, largest first.{% endblocktrans %}{% endif %}
+    {% if truncated %}{% trans "The Image API returned only part of the list." %}{% endif %}
+    {% include "project/telemetry_storage/_notes.html" %}
+  </div>
+  {% else %}
+  <div class="panel-body ps-empty"><i class="fa fa-clone fa-3x" aria-hidden="true"></i>{% trans "No private images. Public images shared by the cloud are not counted here." %}
+    <div class="text-left">{% include "project/telemetry_storage/_notes.html" %}</div></div>
+  {% endif %}
+  <script>ps.showTimes(document.getElementById('ps-images'));</script>
+</div>

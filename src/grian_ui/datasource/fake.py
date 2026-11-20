@@ -99,6 +99,22 @@ class FakeTelemetryClient(DatasourceClient):
             },
         ]
 
+    # Project storage (sample data in fake_project_storage) --------------
+
+    def get_project_storage_footprint(
+        self, project_matcher: str, days: int, at: float = None
+    ) -> dict:
+        from grian_ui.datasource import fake_project_storage
+
+        return fake_project_storage.get_footprint(project_matcher, days, at)
+
+    def get_project_storage_trend(
+        self, project_matcher: str, days: int, at: float = None
+    ) -> dict:
+        from grian_ui.datasource import fake_project_storage
+
+        return fake_project_storage.get_trend(project_matcher, days, at)
+
 
 def get_client(request=None) -> DatasourceClient:
     """

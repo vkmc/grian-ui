@@ -1,0 +1,77 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-area-chart" aria-hidden="true"></i> {% trans "Storage footprint over time" %}</h3></div>
+  <div class="panel-body">
+  {% if error_message %}
+  {% include "project/telemetry_storage/_error.html" %}
+  <script>ps.destroyChart('footprint');</script>
+  {% elif not chart.has_data %}
+  <div class="ps-empty">
+    <i class="fa fa-hdd-o fa-3x" aria-hidden="true"></i>
+    {% if has_storage %}
+    {% blocktrans count days=chart.history_days %}No footprint data in the last {{ days }} day.{% plural %}No footprint data in the last {{ days }} days.{% endblocktrans %}<br>
+    {% elif has_images is False %}
+    {% trans "No volumes, snapshots or private images in this project yet." %}<br>
+    {% else %}
+    {% trans "No volumes or snapshots in this project yet." %}<br>
+    {% endif %}
+    <small>{% blocktrans %}The chart starts once Ceilometer reports <code>volume_size</code> for one of your volumes.{% endblocktrans %}</small>
+  </div>
+  {% include "project/telemetry_storage/_notes.html" %}
+  <script>ps.destroyChart('footprint');</script>
+  {% else %}
+  <div class="ps-legend ps-muted">
+    <span><span class="ps-ln" style="border-color: #337ab7;"></span>{% trans "Volumes" %}</span>
+    <span><span class="ps-ln" style="border-color: #b0417a;"></span>{% trans "Snapshots" %}</span>
+    {% if chart.limit is not None %}<span><span class="ps-ln ps-dash" style="border-color: #767676;"></span>{% trans "Quota limit" %}</span>{% endif %}
+  </div>
+  <div class="ps-chart"><canvas id="ps-footprint-canvas-{{ uid }}" role="img" aria-label="{% trans 'Stacked storage footprint over time' %}" aria-describedby="ps-footprint-summary-{{ uid }}"></canvas></div>
+  <p class="sr-only" id="ps-footprint-summary-{{ uid }}">{% blocktrans with v=chart.latest.volumes|floatformat:"-1" s=chart.latest.snapshots|floatformat:"-1" t=chart.latest.total|floatformat:"-1" %}Latest day: volumes {{ v }} GB, snapshots {{ s }} GB, total {{ t }} GB.{% endblocktrans %}{% if chart.limit is not None %} {% blocktrans with limit=chart.limit %}Quota limit {{ limit }} GB.{% endblocktrans %}{% endif %}</p>
+  {% with data_id="ps-footprint-data-"|add:uid %}{{ chart|json_script:data_id }}{% endwith %}
+  <p class="ps-muted" style="margin: 8px 0 0;">{% trans "Stacked: the top of the area is the total counted by the gigabytes quota. Private images are shown separately below; they don't use the volume quota." %}</p>
+  {% if chart.beyond_retention %}
+  <p class="text-muted" style="margin: 6px 0 0;"><i class="fa fa-hourglass-half" aria-hidden="true"></i>
+    {% blocktrans count days=retention_days %}This cloud keeps {{ days }} day of metrics: the chart starts on <span class="ps-date" data-ts="{{ first_ts }}"></span>.{% plural %}This cloud keeps {{ days }} days of metrics: the chart starts on <span class="ps-date" data-ts="{{ first_ts }}"></span>.{% endblocktrans %}</p>
+  {% elif partial_history %}
+  <p class="text-muted" style="margin: 6px 0 0;"><i class="fa fa-hourglass-half" aria-hidden="true"></i>
+    {% blocktrans %}History starts on <span class="ps-date" data-ts="{{ first_ts }}"></span>.{% endblocktrans %}</p>
+  {% endif %}
+  {% include "project/telemetry_storage/_notes.html" %}
+  <script>
+  (function () {
+    var d = ps.readJson('ps-footprint-data-{{ uid }}');
+    var datasets = [
+      { label: '{% filter escapejs %}{% trans "Volumes" %}{% endfilter %}', data: d.volumes, borderColor: ps.colors.volumes,
+        backgroundColor: ps.alpha(ps.colors.volumes, .25), fill: 'origin', stack: 'storage' },
+      { label: '{% filter escapejs %}{% trans "Snapshots" %}{% endfilter %}', data: d.snapshots, borderColor: ps.colors.snapshots,
+        backgroundColor: ps.alpha(ps.colors.snapshots, .25), fill: '-1', stack: 'storage' }
+    ];
+    if (d.limit !== null) {
+      datasets.push({ label: '{% filter escapejs %}{% trans "Quota limit" %}{% endfilter %}', data: d.timestamps.map(function () { return d.limit; }),
+        borderColor: ps.colors.limit, borderDash: [5, 4], borderWidth: 1, pointRadius: 0, pointHoverRadius: 0, fill: false, stack: 'limit' });
+    }
+    datasets.forEach(function (s) {
+      if (s.borderWidth === undefined) { s.borderWidth = 2; s.pointRadius = d.timestamps.length <= 31 ? 2 : 0; }
+      s.tension = .25;
+    });
+    ps.replaceChart('footprint', document.getElementById('ps-footprint-canvas-{{ uid }}'), {
+      type: 'line',
+      data: { labels: d.timestamps.map(ps.formatDay), datasets: datasets },
+      options: {
+        maintainAspectRatio: false, animation: false, spanGaps: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + ps.formatGb(c.parsed.y); } } } },
+        scales: {
+          y: { stacked: true, min: 0, suggestedMax: d.limit !== null ? d.limit * 1.1 : undefined,
+            ticks: { maxTicksLimit: 5, callback: function (v) { return ps.formatGb(v); } }, grid: { color: '#f0f0f0' } },
+          x: { ticks: { maxTicksLimit: 8, autoSkip: true }, grid: { display: false } }
+        }
+      }
+    });
+    ps.showTimes(document.getElementById('ps-footprint'));
+  })();
+  </script>
+  {% endif %}
+  </div>
+</div>

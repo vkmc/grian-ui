@@ -61,3 +61,36 @@ class DatasourceClient(ABC):
     def get_capacity_predictions(self) -> list:
         """Get capacity predictions for storage pools."""
         pass
+
+    # Project storage (see grian_ui.project_storage) -----------------------
+
+    @abstractmethod
+    def get_project_storage_footprint(
+        self, project_matcher: str, days: int, at: float = None
+    ) -> dict:
+        """
+        Get the GB of the project's volumes and snapshots, one point per
+        day over ``days``.
+
+        Args:
+            project_matcher: ``project="<id>"``, from
+                grian_ui.project.project_matcher()
+
+        Returns:
+            dict: ``{"volumes": [[ts, gb], ...], "snapshots": [...]}``
+        """
+        pass
+
+    @abstractmethod
+    def get_project_storage_trend(
+        self, project_matcher: str, days: int, at: float = None
+    ) -> dict:
+        """
+        Get the GB and number of the project's volumes and snapshots over
+        ``days``, for the quota forecasts.
+
+        Returns:
+            dict: ``{"gigabytes": [[ts, gb], ...], "volumes": [[ts, n]],
+            "snapshots": [[ts, n]]}``
+        """
+        pass

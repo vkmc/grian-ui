@@ -1,0 +1,288 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load static %}
+{% block title %}{% trans "Storage" %}{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <h1>{% trans "Storage" %}{% if project_name %} <small>{% blocktrans with name=project_name %}project {{ name }}{% endblocktrans %}</small>{% endif %}</h1>
+</div>
+{% endblock page_header %}
+
+{% block main %}
+<!-- HTMX -->
+<script src="{% static 'vendor/htmx.js' %}"></script>
+<!-- Chart.js -->
+<script src="{% static 'vendor/chart.umd.js' %}"></script>
+
+<style>
+.ps-section { margin-bottom: 20px; }
+.ps-toolbar { margin-bottom: 15px; }
+.ps-muted { color: #595959; font-size: 12px; }
+.ps-loading { padding: 25px; text-align: center; color: #666; }
+.ps-card { border: 0; color: #fff; }
+.ps-card .panel-heading { display: flex; align-items: center; min-height: 110px; padding: 18px 15px; color: #fff; border: 0; border-radius: 3px; background: #337ab7; }
+/* status colours darkened from Bootstrap's for white text (at least 4.5:1) */
+.ps-card.ps-ok .panel-heading { background: #2b7a2b; }
+.ps-card.ps-warning .panel-heading { background: #a35c00; }
+.ps-card.ps-critical .panel-heading { background: #b52b27; }
+.ps-card .ps-icon { font-size: 3em; opacity: .3; margin-right: 15px; }
+.ps-card .ps-value { font-size: 2.3em; font-weight: 300; line-height: 1; margin-bottom: 4px; }
+.ps-card .ps-value small { font-size: .45em; color: #fff; }
+.ps-card .ps-label { font-size: .95em; }
+.ps-card .ps-sub { font-size: .85em; margin-top: 3px; }
+/* summary cards: the same height in a row */
+#ps-root .ps-cards { display: flex; flex-wrap: wrap; }
+#ps-root .ps-cards::before, #ps-root .ps-cards::after { display: none; }
+#ps-root .ps-cards > [class*="col-"] { display: flex; }
+#ps-root .ps-cards .ps-card { flex: 1; display: flex; flex-direction: column; }
+#ps-root .ps-cards .ps-card .panel-heading { flex: 1; }
+/* pressed buttons: the theme's #e6e6e6 is 1.3:1 and equals the hover */
+#ps-root .btn-group .btn.active { background-color: #1a4f80; border-color: #1a4f80; color: #fff; font-weight: 600; }
+/* the default theme's .text-muted (#bbb) is 1.9:1 on white */
+#ps-root .text-muted { color: #595959; }
+#ps-root .text-warning { color: #6b4f1d; }
+#ps-root .text-danger { color: #a12622; }
+#ps-root .text-success { color: #2b6a2b; }
+#ps-root a.ps-link { color: #1a4f80; font-weight: 600; }
+.ps-bounded { font-size: 11px; color: #2b5a2b; background: #dff0d8; border-radius: 3px; padding: 1px 5px; margin-left: 6px; font-weight: normal; }
+.ps-src { font-size: 11px; color: #444; background: #eee; border-radius: 3px; padding: 1px 5px; margin-left: 6px; font-weight: normal; }
+.ps-table { margin-bottom: 0; }
+.ps-table td, .ps-table th { vertical-align: middle !important; }
+.ps-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.ps-attached { background: #337ab7; }
+.ps-unattached { background: #999; }
+.ps-snapshots, .ps-backups { background: #b0417a; }
+.ps-error { background: #b52b27; }
+/* quota rows: one stacked bar per resource, segments separated by a gap */
+.ps-quota-row { display: flex; align-items: center; margin: 9px 0; }
+.ps-quota-row .ps-q-name { width: 150px; font-weight: 600; }
+.ps-quota-row .ps-q-bar { flex: 1; display: flex; height: 18px; background: #eee; border-radius: 4px; overflow: hidden; gap: 2px; }
+.ps-quota-row .ps-q-bar > span { height: 100%; min-width: 2px; }
+.ps-quota-row .ps-q-val { width: 170px; text-align: right; padding-left: 10px; white-space: nowrap; }
+.ps-quota-row .ps-q-fc { width: 210px; padding-left: 12px; font-size: 12px; white-space: nowrap; }
+.ps-q-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 6px 0 0 150px; }
+.ps-tag { display: inline-block; height: 20px; line-height: 18px; padding: 0 6px; border-radius: 3px; font-size: 11px; border: 1px solid; white-space: nowrap; }
+.ps-tag-review { border-color: #a35c00; color: #6b4f1d; background: #fcf3e3; }
+.ps-tag-consider { border-color: #999; color: #444; background: #f3f3f3; }
+.ps-tag-keep { border-color: #2b7a2b; color: #2b6a2b; background: #e6f4e6; }
+.ps-chart { position: relative; height: 220px; }
+.ps-legend { margin-bottom: 4px; font-size: 12px; }
+.ps-legend > span { margin-right: 16px; white-space: nowrap; }
+.ps-legend .ps-ln { display: inline-block; width: 16px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
+.ps-legend .ps-ln.ps-dash { border-top-style: dashed; }
+.ps-empty { padding: 30px 20px; text-align: center; color: #595959; }
+.ps-empty .fa-3x { opacity: .4; display: block; margin-bottom: 10px; }
+/* how this page is calculated */
+.ps-how > summary { cursor: pointer; }
+.ps-how > summary .panel-title { display: inline; }
+.ps-how-table th, .ps-how-table td { padding: 3px 12px 3px 0; vertical-align: top; }
+.ps-how-table th[scope="row"] { white-space: nowrap; }
+</style>
+
+<script>
+window.ps = window.ps || {};
+ps.charts = ps.charts || {};
+// Series colours of the mockups: volumes #337ab7 and snapshots #b0417a
+// (checked with a palette validator for colour-vision deficiency), grey
+// for unattached volumes and the quota line.
+ps.colors = { volumes: '#337ab7', snapshots: '#b0417a', limit: '#767676' };
+ps.alpha = function (hex, a) {
+  return 'rgba(' + parseInt(hex.slice(1, 3), 16) + ',' + parseInt(hex.slice(3, 5), 16) + ',' +
+    parseInt(hex.slice(5, 7), 16) + ',' + a + ')';
+};
+ps.readJson = function (id) {
+  var el = document.getElementById(id);
+  return el ? JSON.parse(el.textContent) : null;
+};
+ps.formatGb = function (v) {
+  if (v === null || v === undefined) { return '–'; }
+  return (Math.abs(v) >= 100 ? Math.round(v) : +v.toFixed(1)) + ' GB';
+};
+// Browser-local dates and times.
+ps.formatDay = function (ts) {
+  return new Date(ts * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
+ps.formatClock = function (ts) {
+  return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+ps.showTimes = function (root) {
+  if (!root) { return; }
+  root.querySelectorAll('.ps-clock').forEach(function (el) {
+    el.textContent = ps.formatClock(parseInt(el.getAttribute('data-ts'), 10));
+  });
+  root.querySelectorAll('.ps-date').forEach(function (el) {
+    el.textContent = ps.formatDay(parseInt(el.getAttribute('data-ts'), 10));
+  });
+};
+ps.updated = function (ts) {
+  var el = document.getElementById('ps-updated');
+  if (el && ts) { el.textContent = ps.formatClock(ts); }
+};
+ps.replaceChart = function (key, canvas, config) {
+  if (ps.charts[key]) { ps.charts[key].destroy(); }
+  ps.charts[key] = canvas ? new Chart(canvas, config) : null;
+};
+ps.destroyChart = function (key) {
+  if (ps.charts[key]) { ps.charts[key].destroy(); ps.charts[key] = null; }
+};
+ps.setRange = function (range) {
+  document.getElementById('ps-range').value = range;
+  document.querySelectorAll('#ps-range-buttons button').forEach(function (b) {
+    var active = b.getAttribute('data-range') === range;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  htmx.trigger(document.body, 'ps-change');
+};
+ps.text = {
+  notRefreshed: '{% filter escapejs %}{% trans "Could not be refreshed: showing the last data received." %}{% endfilter %}',
+  notLoaded: '{% filter escapejs %}{% trans "Could not be loaded: trying again at the next refresh." %}{% endfilter %}'
+};
+// htmx keeps the old content when a request fails (5xx, network error):
+// say so in the section, until its next successful swap replaces it
+ps.markNotRefreshed = function (target, text) {
+  var note = target.querySelector(':scope > .ps-not-refreshed');
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'text-warning ps-not-refreshed';
+    note.style.margin = '0 0 6px';
+    target.insertBefore(note, target.firstChild);
+  }
+  note.textContent = '';
+  var icon = document.createElement('i');
+  icon.className = 'fa fa-exclamation-triangle';
+  icon.setAttribute('aria-hidden', 'true');
+  note.appendChild(icon);
+  note.appendChild(document.createTextNode(' ' + text));
+};
+['htmx:sendError', 'htmx:responseError'].forEach(function (name) {
+  document.body.addEventListener(name, function (e) {
+    var target = e.detail.target;
+    // expired session: Horizon answers 401 to AJAX requests
+    if (e.detail.xhr && e.detail.xhr.status === 401) { window.location.reload(); return; }
+    if (target && target.closest && target.closest('#ps-root')) {
+      ps.markNotRefreshed(target, target.querySelector('.ps-loading, [data-ps-nodata]') ?
+        ps.text.notLoaded : ps.text.notRefreshed);
+    }
+  });
+});
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') { htmx.trigger(document.body, 'ps-refresh'); }
+});
+</script>
+
+{% for message in error_messages %}
+<div class="alert alert-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ message }}</div>
+{% endfor %}
+
+<div id="ps-root" hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
+<!-- Shared request parameters for the partials -->
+<form id="ps-controls" onsubmit="return false;">
+  <input type="hidden" name="range" id="ps-range" value="{{ default_range }}">
+</form>
+
+<div class="row ps-toolbar">
+  <div class="col-sm-7">
+    <div class="btn-group btn-group-sm" role="group" aria-label="{% trans 'Time range' %}" id="ps-range-buttons">
+      {% for range in ranges %}
+      <button type="button" class="btn btn-default{% if range == default_range %} active{% endif %}"
+              data-range="{{ range }}" aria-pressed="{% if range == default_range %}true{% else %}false{% endif %}"
+              {% if range in ranges_beyond_retention %}title="{% blocktrans with days=retention_days %}Metrics are kept for {{ days }} days: the chart shows where the history starts.{% endblocktrans %}"{% endif %}
+              onclick="ps.setRange('{{ range }}')">{{ range }}</button>
+      {% endfor %}
+    </div>
+    <span class="ps-muted" style="margin-left: 8px;">{% trans "Range for the footprint chart. Storage changes slowly, so ranges are in days." %}</span>
+  </div>
+  <div class="col-sm-5 text-right ps-muted" style="line-height: 30px;">
+    <i class="fa fa-refresh" aria-hidden="true"></i>
+    {% blocktrans with minutes=refresh_minutes %}Auto-refresh every {{ minutes }} min{% endblocktrans %}
+    | {% trans "last updated" %} <span id="ps-updated">–</span>
+  </div>
+</div>
+
+<!-- 1. Summary cards -->
+<div id="ps-summary" class="ps-section"
+     hx-get="{% url 'horizon:project:telemetry_storage:summary' %}"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], ps-refresh from:body, ps-retry"
+     hx-swap="innerHTML">
+  <div class="ps-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+</div>
+
+<!-- 2. Storage quota (4 rows) -->
+<div id="ps-quota" class="ps-section"
+     hx-get="{% url 'horizon:project:telemetry_storage:quota' %}"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], ps-refresh from:body, ps-retry"
+     hx-swap="innerHTML">
+  <div class="panel panel-default"><div class="ps-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+</div>
+
+<div class="row">
+  <!-- 3. Footprint over the selected range -->
+  <div class="col-md-7">
+    <div id="ps-footprint" class="ps-section"
+         hx-get="{% url 'horizon:project:telemetry_storage:footprint' %}"
+         hx-include="#ps-controls"
+         hx-sync="this:replace"
+         hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], ps-refresh from:body, ps-retry, ps-change from:body"
+         hx-swap="innerHTML">
+      <div class="panel panel-default"><div class="ps-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+    </div>
+  </div>
+  <!-- 4. Clean-up candidates (bounded) -->
+  <div class="col-md-5">
+    <div id="ps-cleanup" class="ps-section"
+         hx-get="{% url 'horizon:project:telemetry_storage:cleanup' %}"
+         hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], ps-refresh from:body, ps-retry"
+         hx-swap="innerHTML">
+      <div class="panel panel-default"><div class="ps-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <!-- 5. Volumes and snapshots (bounded) -->
+  <div class="col-md-7">
+    <div id="ps-volumes" class="ps-section"
+         hx-get="{% url 'horizon:project:telemetry_storage:volumes' %}"
+         hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], ps-refresh from:body, ps-retry"
+         hx-swap="innerHTML">
+      <div class="panel panel-default"><div class="ps-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+    </div>
+  </div>
+  <!-- 6. Private images (bounded) -->
+  <div class="col-md-5">
+    <div id="ps-images" class="ps-section"
+         hx-get="{% url 'horizon:project:telemetry_storage:images' %}"
+         hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], ps-refresh from:body, ps-retry"
+         hx-swap="innerHTML">
+      <div class="panel panel-default"><div class="ps-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+    </div>
+  </div>
+</div>
+
+{% if thresholds %}
+{# A native disclosure: keyboard and screen reader support without script. #}
+<details class="panel panel-default ps-section ps-how" id="ps-how">
+  <summary class="panel-heading"><h3 class="panel-title"><i class="fa fa-sliders" aria-hidden="true"></i> {% trans "How this page is calculated" %} <small class="text-muted">{% trans "(click to expand)" %}</small></h3></summary>
+  <div class="panel-body">
+    <table class="ps-how-table ps-muted">
+      <tr><th scope="col">{% trans "Item" %}</th><th scope="col">{% trans "Source / query" %}</th><th scope="col">{% trans "Rule" %}</th></tr>
+      <tr><th scope="row">{% trans "Quota rows" %}</th><td>{% trans "Block Storage API (limits, volume and snapshot lists)" %}</td><td>{% blocktrans with w=thresholds.quota_warning c=thresholds.quota_critical %}Warning ≥ {{ w }}%, critical ≥ {{ c }}%{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Forecast" %}</th><td>{% blocktrans with days=forecast_history_days step=trend_step %}Trend of the last {{ days }} days of the footprint metrics (every {{ step }}); the counts use <code>count(…)</code> instead of <code>sum(…)</code>{% endblocktrans %}</td><td>{% blocktrans with c=thresholds.forecast_critical_days w=thresholds.forecast_warning_days n=min_history_days %}Red within {{ c }} days, amber within {{ w }} days; needs {{ n }} days of history{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Footprint" %}</th><td><code>sum(ceilometer_volume_size)</code>, <code>sum(ceilometer_volume_snapshot_size)</code></td><td>{% blocktrans with w=window %}Daily points (<code>[90d:1d]</code>), each from the last sample of every volume in the {{ w }} before it{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Unattached volume" %}</th><td>{% trans "Volume status <code>available</code>, time since last update" %}</td><td>{% blocktrans with d=thresholds.unattached_days r=thresholds.unattached_review_days %}Candidate after {{ d }} days, "review" after {{ r }} days{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Old snapshot" %}</th><td>{% trans "Snapshot <code>created_at</code>" %}</td><td>{% blocktrans with d=thresholds.snapshot_age_days %}Candidate after {{ d }} days, unless it is the newest snapshot of its volume{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Unused image" %}</th><td>{% trans "Private image not used by any instance in the project (Image and Compute APIs)" %}</td><td>{% blocktrans with d=thresholds.image_age_days %}Candidate after {{ d }} days{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "History" %}</th><td colspan="2">{% blocktrans count days=retention_days %}This cloud keeps {{ days }} day of metrics: longer ranges show where the history starts.{% plural %}This cloud keeps {{ days }} days of metrics: longer ranges show where the history starts.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Refresh" %}</th><td colspan="2">{% blocktrans with m=refresh_minutes s=inventory_seconds %}Every {{ m }} minutes. The API lists are read at most every {{ s }} seconds for the whole project.{% endblocktrans %}</td></tr>
+    </table>
+    <p class="ps-muted" style="margin: 8px 0 0;">{% trans "Cinder doesn't record when a volume was detached. \"Unattached for\" uses the volume's last update time, so it can be shorter than the real idle time." %}</p>
+    <p class="ps-muted" style="margin: 4px 0 0;">{% blocktrans %}The thresholds can be overridden in <code>local_settings</code> with <code>GRIAN_PLUGIN['project_storage_thresholds']</code>.{% endblocktrans %}</p>
+  </div>
+</details>
+{% endif %}
+
+</div>
+
+{% endblock %}

@@ -1,0 +1,49 @@
+{% load i18n %}
+{% if error_message %}
+{% include "project/telemetry_storage/_error.html" %}
+{% else %}
+<div class="row ps-cards">
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel ps-card ps-{{ gigabytes.level }}"><div class="panel-heading">
+      <i class="fa fa-pie-chart ps-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="ps-value">{% if gigabytes.percent is not None %}{{ gigabytes.percent }}%{% else %}{{ gigabytes.used }} GB{% endif %}</div>
+        <div class="ps-label">{% trans "Volume gigabytes quota" %}</div>
+        <div class="ps-sub">{% if gigabytes.limit is not None %}{% blocktrans with used=gigabytes.used limit=gigabytes.limit %}{{ used }} of {{ limit }} GB | volumes + snapshots{% endblocktrans %}{% else %}{% trans "no limit | volumes + snapshots" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel ps-card ps-{{ volumes.level }}"><div class="panel-heading">
+      <i class="fa fa-hdd-o ps-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="ps-value">{{ usage.volumes }}{% if volumes.limit is not None %}<small> / {{ volumes.limit }}</small>{% endif %}</div>
+        <div class="ps-label">{% trans "Volumes" %}</div>
+        <div class="ps-sub">{% if usage.volumes %}{% blocktrans with n=usage.unattached %}{{ n }} unattached{% endblocktrans %}{% else %}{% trans "none yet" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel ps-card ps-{{ snapshots.level }}"><div class="panel-heading">
+      <i class="fa fa-camera ps-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="ps-value">{{ usage.snapshots }}{% if snapshots.limit is not None %}<small> / {{ snapshots.limit }}</small>{% endif %}</div>
+        <div class="ps-label">{% trans "Volume snapshots" %}</div>
+        <div class="ps-sub">{% if usage.snapshots %}{% blocktrans with gb=usage.snapshots_gb %}{{ gb }} GB{% endblocktrans %}{% else %}{% trans "none yet" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel ps-card {% if freed_gb %}ps-warning{% else %}ps-ok{% endif %}"><div class="panel-heading">
+      <i class="fa fa-trash-o ps-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="ps-value">{% blocktrans with gb=freed_gb %}{{ gb }} GB{% endblocktrans %}</div>
+        <div class="ps-label">{% trans "Could be freed" %}</div>
+        <div class="ps-sub">{% if freed_count %}{% blocktrans count n=freed_count %}{{ n }} clean-up candidate{% plural %}{{ n }} clean-up candidates{% endblocktrans %}{% else %}{% trans "nothing to clean up" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+</div>
+{% include "project/telemetry_storage/_notes.html" %}
+{% if fetched_ts %}<script>ps.updated({{ fetched_ts }}); ps.showTimes(document.getElementById('ps-summary'));</script>{% endif %}
+{% endif %}
