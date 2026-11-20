@@ -1,0 +1,15 @@
+{% load i18n %}
+{% if error_message %}
+{% include "project/telemetry_network/_error.html" %}
+{% elif not rows %}
+<p class="text-muted" style="margin: 0;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% trans "The Networking API reports no quota for your project." %}</p>
+{% include "project/telemetry_network/_notes.html" %}
+{% else %}
+{% for row in rows %}
+<div class="pn-quota">
+  <div class="clearfix"><strong>{{ row.label }}</strong><span class="pull-right">{% if row.limit is None %}{% blocktrans with used=row.used %}{{ used }} (no limit){% endblocktrans %}{% else %}{{ row.used }} / {{ row.limit }} <span class="text-muted">({{ row.percent }}%)</span>{% endif %}</span></div>
+  <div class="pn-quota-bar" role="img" aria-label="{% if row.limit is None %}{% blocktrans with label=row.label used=row.used %}{{ label }}: {{ used }} used, no limit{% endblocktrans %}{% else %}{% blocktrans with label=row.label used=row.used limit=row.limit percent=row.percent %}{{ label }}: {{ used }} of {{ limit }} used ({{ percent }}%){% endblocktrans %}{% endif %}"><span class="pn-quota-{{ row.level }}" style="width: {{ row.bar }}%;"></span></div>
+</div>
+{% endfor %}
+{% include "project/telemetry_network/_notes.html" %}
+{% endif %}

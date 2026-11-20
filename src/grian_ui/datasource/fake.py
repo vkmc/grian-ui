@@ -99,6 +99,30 @@ class FakeTelemetryClient(DatasourceClient):
             },
         ]
 
+    # Project network (sample data in grian_ui.datasource.fake_project_network)
+
+    def get_project_network_interfaces(self, project_matcher) -> dict:
+        """Get sample interface rates (see fake_project_network)."""
+        from grian_ui.datasource import fake_project_network
+
+        return fake_project_network.fake_interfaces()
+
+    def get_project_network_traffic_trend(
+        self, project_matcher, range_key, at=None
+    ) -> dict:
+        """Get a sample project traffic trend."""
+        from grian_ui.datasource import fake_project_network
+
+        return fake_project_network.fake_traffic_trend(range_key, at)
+
+    def get_project_network_interface_trend(
+        self, project_matcher, range_key, at=None
+    ) -> dict:
+        """Get sample inbound packets/s per interface."""
+        from grian_ui.datasource import fake_project_network
+
+        return fake_project_network.fake_interface_trend(range_key, at)
+
 
 def get_client(request=None) -> DatasourceClient:
     """

@@ -1,0 +1,35 @@
+{% load i18n %}
+{% if error_message %}
+{% include "project/telemetry_network/_error.html" %}
+<script>pn.destroyChart('traffic');</script>
+{% elif not has_data %}
+<p class="text-muted text-center" style="padding: 20px;"><i class="fa fa-info-circle" aria-hidden="true"></i> {% trans "No traffic from your instances in the selected range." %}</p>
+<script>pn.destroyChart('traffic');</script>
+{% include "project/telemetry_network/_notes.html" %}
+{% else %}
+<div class="pn-chart"><canvas id="pn-traffic-canvas-{{ uid }}" role="img" aria-label="{% trans 'Project traffic, inbound and outbound' %}" aria-describedby="pn-traffic-summary-{{ uid }}"></canvas></div>
+<p class="sr-only" id="pn-traffic-summary-{{ uid }}">{% blocktrans with inbound=latest.in outbound=latest.out %}Latest values: inbound {{ inbound }}, outbound {{ outbound }}.{% endblocktrans %}</p>
+{% with data_id="pn-traffic-data-"|add:uid %}{{ chart|json_script:data_id }}{% endwith %}
+<p class="pn-muted" style="margin: 6px 0 0;">{% trans "Sum over all your instances' network interfaces. Inbound is traffic received by your instances. Gaps mean no data." %}</p>
+{% include "project/telemetry_network/_notes.html" %}
+<script>
+(function () {
+  var d = pn.readJson('pn-traffic-data-{{ uid }}');
+  var labels = d.series['in'].map(function (p) { return pn.formatTime(p[0]); });
+  var values = function (s) { return (s || []).map(function (p) { return p[1]; }); };
+  pn.replaceChart('traffic', document.getElementById('pn-traffic-canvas-{{ uid }}'), {
+    type: 'line',
+    data: { labels: labels, datasets: [
+      { label: '{% filter escapejs %}{% trans "Inbound" %}{% endfilter %}', data: values(d.series['in']), borderColor: pn.colors.inbound, backgroundColor: 'rgba(51,122,183,.12)', borderWidth: 2, pointRadius: 0, tension: .25, fill: 'origin' },
+      { label: '{% filter escapejs %}{% trans "Outbound" %}{% endfilter %}', data: values(d.series.out), borderColor: pn.colors.outbound, borderWidth: 2, borderDash: [6, 3], pointRadius: 0, tension: .25, fill: false }
+    ] },
+    options: {
+      maintainAspectRatio: false, animation: false, spanGaps: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } },
+        tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + pn.formatRate(c.parsed.y); } } } },
+      scales: { y: { min: 0, ticks: { callback: function (v) { return pn.formatRate(v); } } }, x: { ticks: { maxTicksLimit: 8 } } }
+    }
+  });
+})();
+</script>
+{% endif %}

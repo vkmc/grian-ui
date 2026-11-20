@@ -1,0 +1,16 @@
+---
+features:
+  - |
+    Add the Network dashboard under Project > Telemetry. It tells the
+    members of a project whether their instances' networking works and
+    whether a problem is theirs or the cloud's: every instance behind one
+    router gone quiet points to the cloud, one instance gone quiet to that
+    instance. It also shows routers, ports and floating IPs that are not
+    active, packet drops and errors, traffic and the network quota, from
+    the Ceilometer ``network.*`` meters (read through Aetos with the
+    project's matcher in every query) and the Networking and Compute APIs
+    (with the user's token). Only the project's own instance ports are
+    judged; other projects' ports on its networks are counted. Thresholds
+    can be configured with ``GRIAN_PLUGIN['project_network_thresholds']``.
+    The panel needs the ``_1000_admin_telemetry_panel_group.py`` and
+    ``_1100_project_telemetry_panel_group.py`` enabled files.

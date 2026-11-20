@@ -352,6 +352,31 @@ class PrometheusTelemetryClient(DatasourceClient):
             series.append((result.get("metric", {}), points))
         return series
 
+    # Project network (queries in prometheus_project_network) -------------
+
+    def get_project_network_interfaces(self, project_matcher) -> dict:
+        from grian_ui.datasource import prometheus_project_network
+
+        return prometheus_project_network.get_interfaces(self, project_matcher)
+
+    def get_project_network_traffic_trend(
+        self, project_matcher, range_key, at=None
+    ) -> dict:
+        from grian_ui.datasource import prometheus_project_network
+
+        return prometheus_project_network.get_traffic_trend(
+            self, project_matcher, range_key, at
+        )
+
+    def get_project_network_interface_trend(
+        self, project_matcher, range_key, at=None
+    ) -> dict:
+        from grian_ui.datasource import prometheus_project_network
+
+        return prometheus_project_network.get_interface_trend(
+            self, project_matcher, range_key, at
+        )
+
 
 def get_client(request) -> DatasourceClient:
     """

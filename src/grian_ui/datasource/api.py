@@ -61,3 +61,47 @@ class DatasourceClient(ABC):
     def get_capacity_predictions(self) -> list:
         """Get capacity predictions for storage pools."""
         pass
+
+    # Project network (see grian_ui.project_network) ----------------------
+
+    @abstractmethod
+    def get_project_network_interfaces(self, project_matcher) -> dict:
+        """
+        Get the rates of the project's instance network interfaces.
+
+        Args:
+            project_matcher: ``project="<id>"``, from
+                grian_ui.project.project_matcher(); in every selector
+
+        Returns:
+            dict: ``{"interfaces": [{"key", "name", "in_pps", "usual_pps",
+            "usual_basis", "in_bps", "out_bps", "lost_pps"}]}``
+        """
+        pass
+
+    @abstractmethod
+    def get_project_network_traffic_trend(
+        self, project_matcher, range_key, at=None
+    ) -> dict:
+        """
+        Get the project's inbound and outbound bytes/s over a range.
+
+        Args:
+            at: evaluation time (epoch seconds), or None for now
+
+        Returns:
+            dict: ``{"in": [[ts, bytes/s], ...], "out": [...]}``
+        """
+        pass
+
+    @abstractmethod
+    def get_project_network_interface_trend(
+        self, project_matcher, range_key, at=None
+    ) -> dict:
+        """
+        Get the inbound packets/s of each project interface over a range.
+
+        Returns:
+            dict: ``{port key: [[ts, packets/s], ...]}``
+        """
+        pass

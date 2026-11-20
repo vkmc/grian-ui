@@ -16,3 +16,4 @@ documentation for details.
    :caption: Contents:
 
    admin-volume-metrics
+   project-telemetry_network

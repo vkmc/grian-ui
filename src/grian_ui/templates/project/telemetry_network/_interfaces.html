@@ -1,0 +1,50 @@
+{% load i18n %}
+{% if error_message %}
+<div class="panel-body">{% include "project/telemetry_network/_error.html" %}</div>
+<script>pn.destroyGroup('spark');</script>
+{% elif not rows %}
+<div class="pn-empty"><i class="fa fa-desktop" aria-hidden="true"></i>{% trans "No running instances with a network interface." %}</div>
+<script>pn.destroyGroup('spark');</script>
+<div class="panel-body" style="padding-top: 0;">{% if not_running %}<p class="pn-muted" style="margin: 0;">{% blocktrans count n=not_running %}{{ n }} interface of instances that are not running is not checked.{% plural %}{{ n }} interfaces of instances that are not running are not checked.{% endblocktrans %}</p>{% endif %}{% include "project/telemetry_network/_notes.html" %}</div>
+{% else %}
+<div class="table-responsive"><table class="table table-hover table-condensed pn-table">
+  <caption class="sr-only">{% trans "Network interfaces of your running instances, problems first" %}</caption>
+  <thead><tr>
+    <th scope="col">{% trans "State" %}</th><th scope="col">{% trans "Instance" %}</th><th scope="col">{% trans "Network / IP" %}</th><th scope="col">{% trans "Port" %}</th>
+    <th scope="col" class="text-right">{% trans "In" %}</th><th scope="col" class="text-right">{% trans "Out" %}</th><th scope="col">{% trans "vs usual" %}</th>
+    <th scope="col" class="text-right">{% trans "Drops + errors" %}</th><th scope="col">{% blocktrans with range=range_key %}Inbound packets, {{ range }}{% endblocktrans %}</th>
+  </tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr{% if row.severity == 3 %} class="danger"{% elif row.severity == 2 %} class="warning"{% endif %}>
+    <td>{% if row.state == "quiet" or row.state == "port_down" %}<span class="label label-danger"><i class="fa {% if row.state == 'quiet' %}fa-eye-slash{% else %}fa-times{% endif %}" aria-hidden="true"></i> {{ row.state_label }}</span>{% elif row.state == "drops" %}<span class="label {% if row.severity == 3 %}label-danger{% else %}label-warning{% endif %}"><i class="fa fa-random" aria-hidden="true"></i> {{ row.state_label }}</span>{% elif row.state == "ok" %}<span class="label label-success"><i class="fa fa-check" aria-hidden="true"></i> {{ row.state_label }}</span>{% else %}<span class="text-muted">{{ row.state_label }}</span>{% endif %}</td>
+    <td>{% if row.link %}<a href="{{ row.link }}"><strong>{{ row.instance_name }}</strong></a>{% else %}<strong>{{ row.instance_name }}</strong>{% endif %}</td>
+    <td>{{ row.network_name|default:"–" }}{% if row.ip %}<br><small class="text-muted">{{ row.ip }}</small>{% endif %}</td>
+    <td><small><code>tap{{ row.key }}</code></small>{% if row.port_status %}<br>{{ row.port_status }}{% if not row.port_admin_up %} <span class="label label-default">{% trans "disabled" %}</span>{% endif %}{% endif %}</td>
+    <td class="text-right">{{ row.in_text }}</td>
+    <td class="text-right">{{ row.out_text }}</td>
+    <td>{% if row.percent is not None %}{% include "project/telemetry_network/_ratio.html" with percent=row.percent %}{% elif row.has_data and row.in_pps is not None %}<span class="text-muted">{% trans "too little traffic" %}</span>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+    <td class="text-right">{% if row.lost_pps is None %}<span class="text-muted">–</span>{% elif row.loss %}{% blocktrans with lost=row.lost_pps|floatformat:"-2" %}{{ lost }} pkt/s{% endblocktrans %}{% else %}0{% endif %}</td>
+    <td>{% if row.spark %}<canvas class="pn-spark" width="110" height="28" id="pn-spark-{{ uid }}-{{ row.spark }}" role="img" aria-label="{% blocktrans with range=range_key %}Inbound packets per second over {{ range }}{% endblocktrans %}"></canvas>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% with data_id="pn-sparks-"|add:uid %}{{ sparks|json_script:data_id }}{% endwith %}
+<div class="panel-footer pn-muted">
+  <i class="fa fa-info-circle" aria-hidden="true"></i>
+  {% trans "One row per network interface (Neutron port) of your running instances. Problems first." %}
+  {% if total > limit %}{% blocktrans with n=limit total=total %}{{ n }} of {{ total }} interfaces shown.{% endblocktrans %}{% endif %}
+  {% if not_running %}{% blocktrans count n=not_running %}{{ n }} interface of instances that are not running is not checked.{% plural %}{{ n }} interfaces of instances that are not running are not checked.{% endblocktrans %}{% endif %}
+  {% include "project/telemetry_network/_notes.html" %}
+</div>
+<script>
+(function () {
+  var d = pn.readJson('pn-sparks-{{ uid }}') || {};
+  pn.destroyGroup('spark');
+  Object.keys(d).forEach(function (name) {
+    pn.spark('spark', document.getElementById('pn-spark-{{ uid }}-' + name), d[name].points, d[name].quiet);
+  });
+})();
+</script>
+{% endif %}

@@ -1,0 +1,1 @@
+{# Traffic now vs usual: 100% = usual. Red below the quiet threshold, amber below 50%. #}<span class="pn-ratio{% if percent < thresholds.quiet_percent %} pn-crit{% elif percent < 50 %} pn-warn{% endif %}" aria-hidden="true"><span style="width: {% if percent > 100 %}100{% else %}{{ percent }}{% endif %}%;"></span></span>{{ percent }}%

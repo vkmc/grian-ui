@@ -215,3 +215,43 @@ def get_openstack_keystone_url():
 def get_openstack_endpoint_type():
     """Get OpenStack endpoint type (interface) from settings."""
     return getattr(settings, "OPENSTACK_ENDPOINT_TYPE", "publicURL")
+
+
+#: Default Project Network thresholds (the mockup's values).
+DEFAULT_PROJECT_NETWORK_THRESHOLDS = {
+    # an interface is quiet when its inbound packet rate fell below this
+    # share of its usual rate, percent (less than 100)
+    "quiet_percent": 10,
+    # interfaces whose usual inbound rate is lower are too bursty to call
+    # quiet: only drops, errors and port state are checked, packets/s
+    "quiet_min_pps": 0.5,
+    # dropped + failed packets (both directions) above this rate are a
+    # warning, and at or above the critical rate critical, packets/s
+    "packet_loss_warning": 0,
+    "packet_loss_critical": 10,
+    # quota bars turn amber and red at these percentages of the limit
+    "quota_warning": 75,
+    "quota_critical": 90,
+}
+
+
+def get_project_network_thresholds():
+    """
+    Get the Project Network thresholds.
+
+    Defaults (DEFAULT_PROJECT_NETWORK_THRESHOLDS) can be overridden per key
+    with ``GRIAN_PLUGIN['project_network_thresholds']``. See
+    get_thresholds().
+
+    Raises:
+        ConfigurationError: If an override is unknown or out of range
+    """
+    thresholds = get_thresholds(
+        "project_network_thresholds", DEFAULT_PROJECT_NETWORK_THRESHOLDS
+    )
+    if thresholds["quiet_percent"] >= 100:
+        raise ConfigurationError(
+            "GRIAN_PLUGIN['project_network_thresholds']['quiet_percent'] "
+            f"must be less than 100, got {thresholds['quiet_percent']!r}"
+        )
+    return thresholds

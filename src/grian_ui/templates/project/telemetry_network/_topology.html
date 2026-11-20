@@ -1,0 +1,44 @@
+{% load i18n %}
+{% if error_message %}
+<div class="panel-body">{% include "project/telemetry_network/_error.html" %}</div>
+{% elif not rows %}
+<div class="pn-empty"><i class="fa fa-sitemap" aria-hidden="true"></i>{% trans "No routers or networks in your project." %}</div>
+<div class="panel-body" style="padding-top: 0;">{% include "project/telemetry_network/_notes.html" %}</div>
+{% else %}
+<div class="table-responsive"><table class="table table-condensed pn-table">
+  <caption class="sr-only">{% trans "Your routers, each followed by its networks" %}</caption>
+  <thead><tr>
+    <th scope="col">{% trans "Router / network" %}</th><th scope="col">{% trans "Status in Neutron" %}</th>
+    <th scope="col">{% trans "Instances affected" %}</th><th scope="col">{% trans "Traffic now vs usual" %}</th>
+    <th scope="col" class="text-right">{% trans "Drops + errors" %}</th>
+  </tr></thead>
+  <tbody>
+  {% for row in rows %}
+  {% if row.type == "network" %}
+  <tr>
+    <td class="pn-indent"><i class="fa fa-share-alt text-muted" aria-hidden="true"></i> {{ row.name|default:row.id }}{% if row.cidr %} <small class="text-muted">{{ row.cidr }}</small>{% endif %}{% if row.other_project_ports %} <small class="text-muted" title="{% trans 'Neutron shows you every port on networks you own. Their traffic belongs to other projects and is not shown or counted.' %}">| {% blocktrans count n=row.other_project_ports %}{{ n }} port of other projects{% plural %}{{ n }} ports of other projects{% endblocktrans %}</small>{% endif %}</td>
+    <td>{{ row.status|default:"–" }}</td>
+    <td>{% if row.quiet %}<span class="text-danger">{% blocktrans with q=row.quiet n=row.total %}{{ q }} of {{ n }}{% endblocktrans %}</span>{% else %}{% blocktrans with n=row.total %}0 of {{ n }}{% endblocktrans %}{% endif %}</td>
+    <td>{% if row.percent is None %}<span class="text-muted">–</span>{% else %}{% include "project/telemetry_network/_ratio.html" with percent=row.percent %}{% endif %}</td>
+    <td class="text-right">{% if row.lost_pps is None %}<span class="text-muted">–</span>{% else %}{{ row.lost_pps|floatformat:"-1" }}{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr{% if row.all_quiet %} class="danger"{% elif row.type == "router" and not row.active %} class="warning"{% endif %}>
+    <td>{% if row.type == "router" %}<i class="fa fa-arrows-alt text-muted" aria-hidden="true"></i> <strong>{{ row.name|default:row.id }}</strong>{% if row.gateway %} <small class="text-muted">{% blocktrans with ip=row.gateway %}gateway {{ ip }}{% endblocktrans %}</small>{% else %} <small class="text-muted">{% trans "no external gateway" %}</small>{% endif %}{% else %}<em>{% trans "Not connected to any of your routers" %}</em>{% endif %}</td>
+    <td>{% if row.type == "router" %}{{ row.status|default:"–" }}{% if not row.admin_up %} <span class="label label-default">{% trans "disabled" %}</span>{% endif %}{% endif %}</td>
+    <td>{% if row.quiet %}<strong class="text-danger">{% blocktrans with q=row.quiet n=row.total %}{{ q }} of {{ n }}{% endblocktrans %}</strong>{% else %}{% blocktrans with n=row.total %}0 of {{ n }}{% endblocktrans %}{% endif %}</td>
+    <td>{% if not row.total %}<span class="text-muted">{% trans "no running instances" %}</span>{% elif row.percent is None %}<span class="text-muted">{% trans "too little traffic" %}</span>{% else %}{% include "project/telemetry_network/_ratio.html" with percent=row.percent %}{% endif %}</td>
+    <td class="text-right">{% if row.lost_pps is None %}<span class="text-muted">–</span>{% elif row.lost_pps %}{% blocktrans with lost=row.lost_pps|floatformat:"-1" %}{{ lost }} pkt/s{% endblocktrans %}{% else %}0{% endif %}</td>
+  </tr>
+  {% endif %}
+  {% endfor %}
+  </tbody>
+</table></div>
+<div class="panel-footer pn-muted">
+  <i class="fa fa-info-circle" aria-hidden="true"></i>
+  {% if usual_fallback_only %}{% trans '"Usual" = the average of the last 6 hours: there is less than a day of history.' %}{% else %}{% trans '"Usual" = the same 15 minutes yesterday, or the last 6 hours if there is less history.' %}{% endif %}
+  {% blocktrans with pps=thresholds.quiet_min_pps %}Interfaces under {{ pps }} packets/s are too bursty to judge.{% endblocktrans %}
+  {% if metadata_ports_down %}{% blocktrans count n=metadata_ports_down %}{{ n }} OVN metadata port is DOWN by design and is not counted.{% plural %}{{ n }} OVN metadata ports are DOWN by design and are not counted.{% endblocktrans %}{% endif %}
+  {% include "project/telemetry_network/_notes.html" %}
+</div>
+{% endif %}

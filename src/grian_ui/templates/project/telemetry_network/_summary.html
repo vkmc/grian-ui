@@ -1,0 +1,96 @@
+{% load i18n %}
+{% if error_message %}
+{% include "project/telemetry_network/_error.html" %}
+{% else %}
+{% with v=summary.verdict %}
+<div class="pn-verdict pn-verdict-{{ v.level }}">
+  {% if v.key == "router_quiet" and v.router_active %}
+  <h4><i class="fa fa-exclamation-circle text-danger" aria-hidden="true"></i>
+    {% blocktrans with router=v.router %}Likely a cloud network problem behind {{ router }}{% endblocktrans %}</h4>
+  <div>{% if v.since_ts %}{% blocktrans with n=v.total router=v.router at=v.since_ts %}All {{ n }} instances behind <strong>{{ router }}</strong> stopped receiving traffic at about <strong class="pn-time" data-ts="{{ at }}"></strong>.{% endblocktrans %}{% else %}{% blocktrans with n=v.total router=v.router %}All {{ n }} instances behind <strong>{{ router }}</strong> stopped receiving traffic.{% endblocktrans %}{% endif %}{% if v.not_judged %} {% blocktrans count n=v.not_judged %}{{ n }} other interface behind it has too little traffic to judge.{% plural %}{{ n }} other interfaces behind it have too little traffic to judge.{% endblocktrans %}{% endif %}
+    {% trans "Neutron still reports the router as ACTIVE, so the cause is probably outside your configuration." %}
+    <br><strong>{% trans "What to do:" %}</strong> {% trans "contact your cloud operator. Give them the router name, the time it started and this page's link." %}{% if v.others_fine %} {% trans "Instances on other routers are not affected." %}{% endif %}</div>
+  {% elif v.key == "router_quiet" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans with router=v.router %}Router {{ router }} is not active and every instance behind it went quiet{% endblocktrans %}</h4>
+  <div>{% blocktrans with n=v.total router=v.router %}All {{ n }} instances behind <strong>{{ router }}</strong> stopped receiving traffic, and Neutron reports the router as not ACTIVE or disabled.{% endblocktrans %}{% if v.not_judged %} {% blocktrans count n=v.not_judged %}{{ n }} other interface behind it has too little traffic to judge.{% plural %}{{ n }} other interfaces behind it have too little traffic to judge.{% endblocktrans %}{% endif %}
+    <br><strong>{% trans "Check first:" %}</strong> {% trans "the router under Project → Network: whether it was disabled (admin state) or lost its external gateway." %}</div>
+  {% elif v.key == "instances_quiet" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% if v.instances_total == 1 %}{% if v.has_neighbours %}{% blocktrans with name=v.instances.0 %}{{ name }} stopped receiving traffic; its neighbours are fine{% endblocktrans %}{% else %}{% blocktrans with name=v.instances.0 %}{{ name }} stopped receiving traffic{% endblocktrans %}{% endif %}{% else %}{% if v.has_neighbours %}{% blocktrans with n=v.instances_total %}{{ n }} instances stopped receiving traffic; their neighbours are fine{% endblocktrans %}{% else %}{% blocktrans with n=v.instances_total %}{{ n }} instances stopped receiving traffic{% endblocktrans %}{% endif %}{% endif %}</h4>
+  <div>{% if v.instances_total > 1 %}{{ v.instances|join:", " }}{% if v.instances_total > v.instances|length %} …{% endif %}. {% endif %}{% if v.has_neighbours %}{% blocktrans with network=v.network %}Other instances on <strong>{{ network }}</strong> are normal, so the network itself works.{% endblocktrans %}{% endif %}
+    <br><strong>{% trans "Check first:" %}</strong> {% trans "recent security group changes, the instance's console (is the network interface up, is the service running?), and whether its port was disabled." %}</div>
+  {% elif v.key == "not_active" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=v.resources_total %}{{ n }} network resource is not active{% plural %}{{ n }} network resources are not active{% endblocktrans %}</h4>
+  <div>{% for r in v.resources %}{% if r.kind == "router" %}{% blocktrans with name=r.name %}router {{ name }}{% endblocktrans %}{% elif r.kind == "floating_ip" %}{% blocktrans with name=r.name %}floating IP {{ name }}{% endblocktrans %}{% else %}{% blocktrans with name=r.name %}port of {{ name }}{% endblocktrans %}{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}{% if v.resources_total > v.resources|length %} …{% endif %}.
+    {% trans "Check them under Project → Network." %}</div>
+  {% elif v.key == "packet_loss" %}
+  <h4><i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
+    {% blocktrans count n=v.interfaces_total %}Packet drops or errors on {{ n }} interface{% plural %}Packet drops or errors on {{ n }} interfaces{% endblocktrans %}</h4>
+  <div>{% trans "Traffic flows, but some packets are lost. Small numbers can come from bursts inside the guest; if it lasts or grows, check the instance and tell your operator." %}</div>
+  {% elif not summary.inventory_checked %}
+  <h4><i class="fa fa-info-circle text-muted" aria-hidden="true"></i> {% trans "No problems detected in the interface telemetry" %}</h4>
+  <div>{% trans "The Networking API data is not available: routers, ports and floating IPs are not checked." %}</div>
+  {% elif not summary.traffic_checked %}
+  <h4><i class="fa fa-info-circle text-muted" aria-hidden="true"></i> {% trans "No problems detected in your network resources" %}</h4>
+  <div>{% trans "The interface telemetry is not available: quiet interfaces, drops and errors are not checked." %}</div>
+  {% else %}
+  <h4><i class="fa fa-check-circle text-success" aria-hidden="true"></i> {% trans "No network problems detected in your project" %}</h4>
+  <div>{% blocktrans count n=summary.routers_total %}Checked {{ n }} router{% plural %}Checked {{ n }} routers{% endblocktrans %} {% blocktrans count n=summary.interfaces_total %}and {{ n }} instance interface: all look normal.{% plural %}and {{ n }} instance interfaces: all look normal.{% endblocktrans %}
+    {% if summary.low_traffic %}<br><i class="fa fa-info-circle text-muted" aria-hidden="true"></i> {% if summary.all_low %}{% blocktrans with pps=thresholds.quiet_min_pps %}Traffic on all your interfaces is too low (under {{ pps }} packets/s) to tell whether it stopped, so only drops, errors and resource states are checked there.{% endblocktrans %}{% else %}{% blocktrans with pps=thresholds.quiet_min_pps %}Traffic on some interfaces is too low (under {{ pps }} packets/s) to tell whether it stopped, so only drops, errors and resource states are checked there.{% endblocktrans %}{% endif %}{% endif %}</div>
+  {% endif %}
+</div>
+{% endwith %}
+<div class="row pn-cards">
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pn-card {% if not summary.traffic_checked %}pn-none{% elif summary.quiet > 1 %}pn-crit{% elif summary.quiet %}pn-warn{% else %}pn-ok{% endif %}">
+      <div class="panel-heading">
+        <i class="fa fa-eye-slash pn-icon" aria-hidden="true"></i>
+        <div class="text-right" style="flex: 1;">
+          <div class="pn-value">{% if summary.traffic_checked %}{{ summary.quiet }}{% else %}–{% endif %}</div>
+          <div class="pn-label">{% trans "Instances gone quiet" %}</div>
+          <div class="pn-sub">{% if not summary.traffic_checked %}{% trans "not checked" %}{% elif summary.quiet %}{% trans "traffic far below usual" %}{% elif summary.all_low %}{% trans "traffic too low to judge" %}{% else %}{% trans "traffic as usual" %}{% endif %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pn-card {% if not summary.traffic_checked %}pn-none{% elif summary.lossy_critical %}pn-crit{% elif summary.lossy %}pn-warn{% else %}pn-ok{% endif %}">
+      <div class="panel-heading">
+        <i class="fa fa-random pn-icon" aria-hidden="true"></i>
+        <div class="text-right" style="flex: 1;">
+          <div class="pn-value">{% if summary.traffic_checked %}{{ summary.lossy }}{% else %}–{% endif %}</div>
+          <div class="pn-label">{% trans "Interfaces dropping packets" %}</div>
+          <div class="pn-sub">{% if not summary.traffic_checked %}{% trans "not checked" %}{% elif summary.lossy %}{% blocktrans with window=rate_window %}drops or errors in the last {{ window }}{% endblocktrans %}{% else %}{% trans "no drops or errors" %}{% endif %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pn-card {% if not summary.inventory_checked %}pn-none{% elif summary.not_active %}pn-warn{% else %}pn-ok{% endif %}">
+      <div class="panel-heading">
+        <i class="fa fa-sitemap pn-icon" aria-hidden="true"></i>
+        <div class="text-right" style="flex: 1;">
+          <div class="pn-value">{% if summary.inventory_checked %}{{ summary.not_active }}{% else %}–{% endif %}</div>
+          <div class="pn-label">{% trans "Routers, ports or floating IPs not active" %}</div>
+          <div class="pn-sub">{% if not summary.inventory_checked %}{% trans "not checked" %}{% elif summary.not_active %}{% trans "see below" %}{% else %}{% blocktrans count n=summary.routers_total %}{{ n }} router{% plural %}{{ n }} routers{% endblocktrans %} | {% blocktrans count n=summary.floating_ips_total %}{{ n }} floating IP{% plural %}{{ n }} floating IPs{% endblocktrans %}{% endif %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pn-card {% if summary.traffic_checked %}pn-info{% else %}pn-none{% endif %}">
+      <div class="panel-heading">
+        <i class="fa fa-exchange pn-icon" aria-hidden="true"></i>
+        <div class="text-right" style="flex: 1;">
+          <div class="pn-value">{{ summary.in_text }}</div>
+          <div class="pn-label">{% trans "Inbound now" %}</div>
+          <div class="pn-sub">{% blocktrans with out=summary.out_text %}{{ out }} outbound{% endblocktrans %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% include "project/telemetry_network/_notes.html" %}
+{% endif %}

@@ -1,0 +1,23 @@
+{% load i18n %}
+{% if error_message %}
+<div class="panel-body">{% include "project/telemetry_network/_error.html" %}</div>
+{% elif not total %}
+<div class="pn-empty"><i class="fa fa-globe" aria-hidden="true"></i>{% trans "No floating IPs. Instances are reachable only from inside the cloud." %}</div>
+<div class="panel-body" style="padding-top: 0;">{% include "project/telemetry_network/_notes.html" %}</div>
+{% else %}
+<table class="table table-condensed pn-table">
+  <caption class="sr-only">{% trans "Your floating IPs, problems first" %}</caption>
+  <tbody>
+  {% for row in rows %}
+  <tr{% if row.problem %} class="danger"{% endif %}>
+    <td><strong>{{ row.ip }}</strong></td>
+    <td>{{ row.status|default:"–" }}</td>
+    <td>{% if row.associated %}→ {{ row.target }}{% else %}<span class="text-muted">{% trans "not associated" %}</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<div class="panel-footer pn-muted">{% trans "An unassociated floating IP is DOWN by design, but still counts against your quota." %}
+  {% if total > limit %}{% blocktrans with n=limit total=total %}{{ n }} of {{ total }} floating IPs shown.{% endblocktrans %}{% endif %}
+  {% include "project/telemetry_network/_notes.html" %}</div>
+{% endif %}

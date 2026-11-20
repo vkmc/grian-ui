@@ -1,0 +1,322 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load static %}
+{% block title %}{% trans "Network" %}{% endblock %}
+
+{% block page_header %}
+  {% include "horizon/common/_page_header.html" with title=_("Network") %}
+{% endblock page_header %}
+
+{% block main %}
+<!-- HTMX -->
+<script src="{% static 'vendor/htmx.js' %}"></script>
+<!-- Chart.js -->
+<script src="{% static 'vendor/chart.umd.js' %}"></script>
+
+<style>
+.pn-section { margin-bottom: 20px; }
+.pn-toolbar { margin-bottom: 15px; }
+.pn-muted { color: #595959; font-size: 12px; }
+.pn-loading { padding: 25px; text-align: center; color: #666; }
+.pn-card { border: 0; color: #fff; }
+.pn-card .panel-heading { display: flex; align-items: center; min-height: 110px; padding: 18px 15px; color: #fff; border: 0; border-radius: 3px; }
+/* darker than the chart colours so white text meets WCAG AA (>= 4.5:1) */
+.pn-card.pn-info .panel-heading { background: #337ab7; }
+.pn-card.pn-ok .panel-heading { background: #2b7a2b; }
+.pn-card.pn-warn .panel-heading { background: #a35c00; }
+.pn-card.pn-crit .panel-heading { background: #b52b27; }
+.pn-card.pn-none .panel-heading { background: #666; }
+.pn-card .pn-icon { font-size: 3em; opacity: .3; margin-right: 15px; }
+.pn-card .pn-value { font-size: 2.3em; font-weight: 300; line-height: 1; margin-bottom: 4px; }
+.pn-card .pn-label { font-size: .95em; }
+.pn-card .pn-sub { font-size: .85em; margin-top: 3px; }
+#pn-root .label-success { background-color: #2b7a2b; }
+#pn-root .label-warning { background-color: #a35c00; }
+#pn-root .label-danger { background-color: #b52b27; }
+#pn-root .label-default { background-color: #666; }
+/* the theme's .text-warning (#8a6d3b) is 3.8:1 in a highlighted row */
+#pn-root .text-warning { color: #6b4f1d; }
+/* pressed buttons: the theme's #e6e6e6 is 1.3:1 and equals the hover */
+#pn-root .btn-group .btn.active { background-color: #1a4f80; border-color: #1a4f80; color: #fff; font-weight: 600; }
+/* the default theme's .text-muted (#bbb) is 1.9:1 on white */
+#pn-root .text-muted { color: #595959; }
+/* badges: the same height whatever the icon */
+#pn-root .label { display: inline-block; box-sizing: border-box; height: 20px; line-height: 20px; padding-top: 0; padding-bottom: 0; vertical-align: middle; }
+#pn-root .label .fa { font-size: 11px; line-height: inherit; vertical-align: top; }
+/* summary cards: the same height in a row */
+#pn-root .pn-cards { display: flex; flex-wrap: wrap; }
+#pn-root .pn-cards::before, #pn-root .pn-cards::after { display: none; }
+#pn-root .pn-cards > [class*="col-"] { display: flex; }
+#pn-root .pn-cards .pn-card { flex: 1; display: flex; flex-direction: column; }
+#pn-root .pn-cards .pn-card .panel-heading { flex: 1; }
+.pn-verdict { border-left: 5px solid; padding: 12px 15px; margin-bottom: 15px; background: #f7f7f7; }
+.pn-verdict h4 { margin: 0 0 6px; font-weight: 600; }
+.pn-verdict-ok { border-color: #2b7a2b; }
+.pn-verdict-warning { border-color: #a35c00; background: #fcf8f2; }
+.pn-verdict-critical { border-color: #b52b27; background: #fbf1f1; }
+.pn-src { font-size: 11px; font-weight: normal; color: #595959; border: 1px solid #ccc; border-radius: 3px; padding: 1px 5px; margin-left: 6px; }
+.pn-bounded { font-size: 11px; font-weight: normal; color: #fff; background: #2b7a2b; border-radius: 3px; padding: 1px 6px; margin-left: 6px; }
+.pn-table { margin-bottom: 0; }
+.pn-table td, .pn-table th { vertical-align: middle !important; }
+.pn-table td.pn-indent { padding-left: 34px; }
+/* traffic now vs usual: a bar on a white track, at least 3:1 against white */
+.pn-ratio { display: inline-block; width: 70px; height: 10px; border: 1px solid #767676; border-radius: 2px; background: #fff; vertical-align: middle; margin-right: 6px; padding: 1px; }
+.pn-ratio > span { display: block; height: 100%; background: #1f4e79; }
+.pn-ratio.pn-crit > span { background: #b52b27; }
+.pn-ratio.pn-warn > span { background: #a35c00; }
+.pn-chart { position: relative; height: 220px; }
+.pn-quota { margin-top: 9px; }
+.pn-quota-bar { display: flex; height: 10px; border: 1px solid #767676; border-radius: 3px; overflow: hidden; background: #fff; margin-top: 3px; }
+.pn-quota-bar > span { display: block; height: 100%; }
+.pn-quota-ok { background: #337ab7; }
+.pn-quota-warning { background: #a35c00; }
+.pn-quota-critical { background: #b52b27; }
+.pn-spark { display: block; }
+.pn-empty { padding: 25px 20px; text-align: center; color: #595959; }
+.pn-empty .fa { font-size: 2.5em; opacity: .4; display: block; margin-bottom: 8px; }
+/* how this page is calculated */
+.pn-how > summary { cursor: pointer; }
+.pn-how > summary .panel-title { display: inline; }
+.pn-how-table th, .pn-how-table td { padding: 3px 12px 3px 0; vertical-align: top; }
+.pn-how-table th[scope="row"] { white-space: nowrap; }
+</style>
+
+<script>
+window.pn = window.pn || {};
+pn.charts = pn.charts || {};
+// chart colours meet the 3:1 contrast WCAG asks for graphics on white
+pn.colors = { inbound: '#337ab7', outbound: '#b0417a', quiet: '#b52b27' };
+pn.readJson = function (id) {
+  var el = document.getElementById(id);
+  return el ? JSON.parse(el.textContent) : null;
+};
+// times are shown in the browser's time zone
+pn.formatTime = function (ts) {
+  return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+pn.formatClock = function (ts) {
+  return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+pn.formatRate = function (v) {
+  if (v === null || v === undefined) { return '–'; }
+  var units = ['B/s', 'kB/s', 'MB/s', 'GB/s', 'TB/s'], i = 0;
+  while (Math.abs(v) >= 1000 && i < units.length - 1) { v /= 1000; i++; }
+  return (i === 0 || Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1)) + ' ' + units[i];
+};
+pn.replaceChart = function (key, canvas, config) {
+  if (pn.charts[key]) { pn.charts[key].destroy(); }
+  pn.charts[key] = canvas ? new Chart(canvas, config) : null;
+};
+pn.destroyChart = function (key) {
+  if (pn.charts[key]) { pn.charts[key].destroy(); pn.charts[key] = null; }
+};
+// charts of a group (the sparklines), replaced together
+pn.destroyGroup = function (group) {
+  Object.keys(pn.charts).forEach(function (key) {
+    if (key.indexOf(group + ':') === 0) { pn.destroyChart(key); delete pn.charts[key]; }
+  });
+};
+pn.spark = function (group, canvas, points, quiet) {
+  if (!canvas) { return; }
+  pn.replaceChart(group + ':' + canvas.id, canvas, {
+    type: 'line',
+    data: { labels: points.map(function (p) { return p[0]; }), datasets: [{
+      data: points.map(function (p) { return p[1]; }), borderColor: quiet ? pn.colors.quiet : pn.colors.inbound,
+      borderWidth: 1.5, pointRadius: 0, tension: .25, fill: false }] },
+    options: { responsive: false, animation: false, spanGaps: false, events: [],
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { display: false, min: 0 } } }
+  });
+};
+pn.setRange = function (key) {
+  document.getElementById('pn-range').value = key;
+  document.querySelectorAll('#pn-range-buttons button').forEach(function (b) {
+    var active = b.getAttribute('data-range') === key;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  document.querySelectorAll('.pn-range-label').forEach(function (el) { el.textContent = key; });
+  htmx.trigger(document.body, 'pn-range');
+};
+pn.showClocks = function (root) {
+  root.querySelectorAll('.pn-clock').forEach(function (el) {
+    el.textContent = pn.formatClock(parseInt(el.getAttribute('data-ts'), 10));
+  });
+  root.querySelectorAll('.pn-time').forEach(function (el) {
+    el.textContent = pn.formatTime(parseInt(el.getAttribute('data-ts'), 10));
+  });
+};
+document.body.addEventListener('htmx:afterSwap', function (e) {
+  if (e.detail.target.closest && e.detail.target.closest('#pn-root')) { pn.showClocks(e.detail.target); }
+});
+pn.text = {
+  notRefreshed: '{% filter escapejs %}{% trans "Could not be refreshed: showing the last data received." %}{% endfilter %}',
+  notLoaded: '{% filter escapejs %}{% trans "Could not be loaded: trying again at the next refresh." %}{% endfilter %}'
+};
+// htmx keeps the old content when a request fails (5xx, network error):
+// say so in the section, until its next successful swap replaces it
+pn.markNotRefreshed = function (target, text) {
+  var note = target.querySelector(':scope > .pn-not-refreshed');
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'text-warning pn-not-refreshed';
+    note.style.margin = '0 0 6px';
+    target.insertBefore(note, target.firstChild);
+  }
+  note.textContent = '';
+  var icon = document.createElement('i');
+  icon.className = 'fa fa-exclamation-triangle';
+  icon.setAttribute('aria-hidden', 'true');
+  note.appendChild(icon);
+  note.appendChild(document.createTextNode(' ' + text));
+};
+['htmx:sendError', 'htmx:responseError'].forEach(function (name) {
+  document.body.addEventListener(name, function (e) {
+    var target = e.detail.target;
+    // an expired session reloads the page (below)
+    if (e.detail.xhr && e.detail.xhr.status === 401) { return; }
+    if (target && target.closest && target.closest('#pn-root')) {
+      pn.markNotRefreshed(target,
+        target.querySelector('.pn-loading, [data-pn-nodata]') ? pn.text.notLoaded : pn.text.notRefreshed);
+    }
+  });
+});
+document.body.addEventListener('htmx:responseError', function (e) {
+  // expired session: Horizon answers 401 to AJAX requests
+  if (e.detail.xhr && e.detail.xhr.status === 401) { window.location.reload(); }
+});
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') { htmx.trigger(document.body, 'pn-refresh'); }
+});
+</script>
+
+{% for message in error_messages %}
+<div class="alert alert-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ message }}</div>
+{% endfor %}
+
+<div id="pn-root" hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
+<form id="pn-controls" onsubmit="return false;">
+  <input type="hidden" name="range" id="pn-range" value="{{ default_range }}">
+</form>
+
+<div class="row pn-toolbar">
+  <div class="col-sm-8">
+    <div class="btn-group btn-group-sm" role="group" aria-label="{% trans 'Time range' %}" id="pn-range-buttons">
+      {% for range in ranges %}
+      <button type="button" class="btn btn-default{% if range == default_range %} active{% endif %}"
+              data-range="{{ range }}" aria-pressed="{% if range == default_range %}true{% else %}false{% endif %}"
+              onclick="pn.setRange('{{ range }}')">{{ range }}</button>
+      {% endfor %}
+    </div>
+    <span class="pn-muted" style="margin-left: 8px;">{% blocktrans with window=quiet_window %}Range for the traffic charts. Problems are always judged on the last {{ window }}.{% endblocktrans %}</span>
+  </div>
+  <div class="col-sm-4 text-right pn-muted" style="line-height: 30px;">
+    <i class="fa fa-refresh" aria-hidden="true"></i>
+    {% blocktrans with seconds=refresh_seconds %}Refreshes every {{ seconds }}s{% endblocktrans %}
+  </div>
+</div>
+
+<!-- 1. Verdict and summary cards -->
+<div id="pn-summary" class="pn-section"
+     hx-get="{% url 'horizon:project:telemetry_network:summary' %}"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pn-refresh from:body, pn-retry"
+     hx-swap="innerHTML">
+  <div class="pn-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+</div>
+
+<!-- 2. By router and network -->
+<div class="panel panel-default pn-section">
+  <div class="panel-heading">
+    <h3 class="panel-title"><i class="fa fa-sitemap" aria-hidden="true"></i> {% trans "By router and network" %}
+      <span class="pn-src">{% trans "Networking API + metrics" %}</span>
+      <span class="pn-bounded">{% trans "your routers and networks" %}</span></h3>
+  </div>
+  <div hx-get="{% url 'horizon:project:telemetry_network:topology' %}"
+       hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pn-refresh from:body, pn-retry"
+       hx-swap="innerHTML">
+    <div class="pn-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+  </div>
+</div>
+
+<!-- 3. Traffic; 4. quota and floating IPs -->
+<div class="row">
+  <div class="col-md-8">
+    <div class="panel panel-default pn-section">
+      <div class="panel-heading">
+        <h3 class="panel-title"><i class="fa fa-exchange" aria-hidden="true"></i> {% trans "Project traffic" %}
+          <small class="text-muted">(<span class="pn-range-label">{{ default_range }}</span>)</small></h3>
+      </div>
+      <div class="panel-body"
+           hx-get="{% url 'horizon:project:telemetry_network:traffic' %}"
+           hx-include="#pn-controls"
+           hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pn-refresh from:body, pn-retry, pn-range from:body"
+           hx-swap="innerHTML">
+        <div class="pn-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="panel panel-default pn-section">
+      <div class="panel-heading">
+        <h3 class="panel-title"><i class="fa fa-pie-chart" aria-hidden="true"></i> {% trans "Network quota" %}
+          <span class="pn-src">{% trans "Networking API" %}</span></h3>
+      </div>
+      <div class="panel-body" style="padding-top: 5px;"
+           hx-get="{% url 'horizon:project:telemetry_network:quota' %}"
+           hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pn-refresh from:body, pn-retry"
+           hx-swap="innerHTML">
+        <div class="pn-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+      </div>
+    </div>
+    <div class="panel panel-default pn-section">
+      <div class="panel-heading">
+        <h3 class="panel-title"><i class="fa fa-globe" aria-hidden="true"></i> {% trans "Floating IPs" %}
+          <span class="pn-src">{% trans "Networking API" %}</span></h3>
+      </div>
+      <div hx-get="{% url 'horizon:project:telemetry_network:floating_ips' %}"
+           hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pn-refresh from:body, pn-retry"
+           hx-swap="innerHTML">
+        <div class="pn-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 5. Instance interfaces -->
+<div class="panel panel-default pn-section">
+  <div class="panel-heading">
+    <h3 class="panel-title"><i class="fa fa-desktop" aria-hidden="true"></i> {% trans "Instance interfaces" %}
+      <span class="pn-bounded">{% blocktrans with n=interface_limit %}max {{ n }} rows{% endblocktrans %}</span></h3>
+  </div>
+  <div hx-get="{% url 'horizon:project:telemetry_network:interfaces' %}"
+       hx-include="#pn-controls"
+       hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pn-refresh from:body, pn-retry, pn-range from:body"
+       hx-swap="innerHTML">
+    <div class="pn-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+  </div>
+</div>
+
+{% if thresholds %}
+{# A native disclosure: keyboard and screen reader support without script. #}
+<details class="panel panel-default pn-section pn-how" id="pn-how">
+  <summary class="panel-heading"><h3 class="panel-title"><i class="fa fa-sliders" aria-hidden="true"></i> {% trans "How this page is calculated" %} <small class="text-muted">{% trans "(click to expand)" %}</small></h3></summary>
+  <div class="panel-body">
+    <table class="pn-how-table pn-muted">
+      <tr><th scope="col">{% trans "Item" %}</th><th scope="col">{% trans "Source / query" %}</th><th scope="col">{% trans "Rule" %}</th></tr>
+      <tr><th scope="row">{% trans "Your resources" %}</th><td>{% trans "Networking API (routers, networks, ports, floating IPs, quota) and Compute API (instances), with your token" %}</td><td>{% blocktrans with seconds=inventory_seconds %}Shared by the members of the project and refreshed every {{ seconds }} s. Only your own instance ports count: Neutron also lists the ports of other projects' instances on networks you own; their traffic belongs to those projects.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Interface traffic" %}</th><td>{% blocktrans with window=rate_window %}<code>rate(ceilometer_network_{incoming,outgoing}_bytes[{{ window }}])</code>{% endblocktrans %}</td><td>{% trans "Matched to the Neutron port by interface name: <code>tap</code> + the first 11 characters of the port ID." %}</td></tr>
+      <tr><th scope="row">{% trans "Quiet interface" %}</th><td>{% blocktrans with window=quiet_window offset=usual_offset fallback=usual_fallback %}Inbound packets, <code>rate(ceilometer_network_incoming_packets[{{ window }}])</code>, against the same {{ offset }} earlier, or the {{ fallback }} average when there is less history{% endblocktrans %}</td><td>{% blocktrans with percent=thresholds.quiet_percent pps=thresholds.quiet_min_pps %}Below {{ percent }}% of usual. Only judged when usual is at least {{ pps }} packets/s: below that, traffic is too bursty to tell "stopped" from "quiet moment".{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Drops and errors" %}</th><td>{% blocktrans with window=rate_window %}<code>rate(ceilometer_network_{incoming,outgoing}_packets_{drop,error}[{{ window }}])</code>, each metric named explicitly{% endblocktrans %}</td><td>{% blocktrans with warning=thresholds.packet_loss_warning critical=thresholds.packet_loss_critical %}Warning above {{ warning }}, critical at {{ critical }} packets/s or more{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Resource state" %}</th><td>{% trans "Networking API: routers, ports, floating IPs" %}</td><td>{% trans "Anything not ACTIVE, and disabled routers. OVN metadata ports (<code>device_owner=network:distributed</code>) and unassociated floating IPs are DOWN by design and are ignored. Interfaces of instances that are not running are not checked." %}</td></tr>
+      <tr><th scope="row">{% trans "Me or the cloud?" %}</th><td>{% trans "Quiet interfaces grouped by network and router" %}</td><td>{% trans "Every instance behind one router quiet (at least two) while Neutron reports it ACTIVE: probably the cloud. Some instances quiet while their neighbours are fine: probably those instances." %}</td></tr>
+      <tr><th scope="row">{% trans "Network quota" %}</th><td>{% trans "Networking API (<code>/quotas/&lt;project&gt;/details</code>)" %}</td><td>{% blocktrans with warning=thresholds.quota_warning critical=thresholds.quota_critical %}Amber from {{ warning }}%, red from {{ critical }}% of the limit{% endblocktrans %}</td></tr>
+    </table>
+    <p class="pn-muted" style="margin: 8px 0 0;">{% trans "Project users can't see the health of the cloud's network services (agents, gateways). This page infers it from what your own resources show." %}
+      {% blocktrans %}Thresholds can be overridden in <code>local_settings</code> with <code>GRIAN_PLUGIN['project_network_thresholds']</code>.{% endblocktrans %}</p>
+  </div>
+</details>
+{% endif %}
+
+</div>
+
+{% endblock %}
