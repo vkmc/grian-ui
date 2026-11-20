@@ -1,0 +1,119 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading">
+    <h3 class="panel-title" style="display: inline-block;"><i class="fa fa-bar-chart" aria-hidden="true"></i> {% trans "Daily usage" %}
+      {% if period %}<span class="pu-bounded">{% blocktrans with month=period.label %}{{ month }}, UTC days{% endblocktrans %}</span>{% endif %}</h3>
+    {% if chart %}
+    <div class="btn-group btn-group-xs pull-right" role="group" aria-label="{% trans 'Metric' %}" id="pu-metric-buttons-{{ uid }}">
+      <button type="button" class="btn btn-default" data-metric="cpu" aria-pressed="false">{% trans "CPU" %}</button>
+      <button type="button" class="btn btn-default" data-metric="mem" aria-pressed="false">{% trans "Memory" %}</button>
+      <button type="button" class="btn btn-default" data-metric="net" aria-pressed="false">{% trans "Network" %}</button>
+    </div>
+    {% endif %}
+    <div class="clearfix"></div>
+  </div>
+  <div class="panel-body">
+  {% if error_message %}
+  <div data-pu-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+  {% include "project/telemetry_usage/_retry.html" %}
+  <script>pu.destroyChart('daily');</script>
+  {% elif locked %}
+  <p data-pu-nodata class="text-muted text-center" style="padding: 20px; margin: 0;"><i class="fa fa-lock" aria-hidden="true"></i> {{ period.locked_reason }}</p>
+  <script>pu.destroyChart('daily');</script>
+  {% else %}
+  <div class="pu-legend pu-muted" id="pu-daily-legend-{{ uid }}"></div>
+  <div class="pu-chart"><canvas id="pu-daily-canvas-{{ uid }}" role="img" aria-label="{% trans 'Daily usage: held and used per day' %}" aria-describedby="pu-daily-summary-{{ uid }}"></canvas></div>
+  <p class="sr-only" id="pu-daily-summary-{{ uid }}"></p>
+  {% with data_id="pu-daily-data-"|add:uid %}{{ chart|json_script:data_id }}{% endwith %}
+  {% if data_stale %}<p class="text-warning" style="margin: 6px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>{% endif %}
+  <p class="pu-muted" style="margin: 8px 0 0;"><i class="fa fa-info-circle" aria-hidden="true"></i>
+    {% trans "Held: flavor size × hours running. Used: actual use. A large gap every day is capacity held in quota but not used; compare with the use of held CPU in the table below." %}
+    {% if has_bands %}{% trans "Grey: days whose metrics are no longer kept, not days without usage." %}{% endif %}
+    {% if not has_data %}{% trans "No instance of this project ran in the kept days of this period." %}{% endif %}</p>
+  <script>
+  (function () {
+    var d = pu.readJson('pu-daily-data-{{ uid }}');
+    var buttons = document.getElementById('pu-metric-buttons-{{ uid }}');
+    var legend = document.getElementById('pu-daily-legend-{{ uid }}');
+    var summary = document.getElementById('pu-daily-summary-{{ uid }}');
+    var labels = {
+      cpu: ['{% filter escapejs %}{% trans "vCPU-hours held" %}{% endfilter %}', '{% filter escapejs %}{% trans "CPU-hours used" %}{% endfilter %}'],
+      mem: ['{% filter escapejs %}{% trans "RAM GB-hours held" %}{% endfilter %}', '{% filter escapejs %}{% trans "RAM GB-hours used" %}{% endfilter %}'],
+      net: [null, '{% filter escapejs %}{% trans "Traffic (in + out)" %}{% endfilter %}']
+    };
+    var summaryText = '{% filter escapejs %}{% trans "%(name)s: %(total)s over %(days)s days with data; highest on %(day)s." %}{% endfilter %}';
+    function format(metric, v) {
+      return metric === 'net' ? pu.formatBytes(v) : pu.formatAmount(v);
+    }
+    // grey band with a label over the days without data, so they never
+    // read as zero usage
+    var bands = { id: 'puBands', beforeDatasetsDraw: function (chart) {
+      var x = chart.scales.x, area = chart.chartArea, ctx = chart.ctx;
+      var w = d.labels.length > 1 ? x.getPixelForValue(1) - x.getPixelForValue(0) : area.right - area.left;
+      d.bands.forEach(function (b) {
+        var x0 = Math.max(area.left, x.getPixelForValue(b.from) - w / 2);
+        var x1 = Math.min(area.right, x.getPixelForValue(b.to) + w / 2);
+        ctx.save();
+        ctx.fillStyle = pu.colors.band;
+        ctx.fillRect(x0, area.top, x1 - x0, area.bottom - area.top);
+        ctx.fillStyle = pu.colors.bandText;
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        var lines = b.label.split(': ');
+        lines.forEach(function (t, k) {
+          ctx.fillText(t + (k < lines.length - 1 ? ':' : ''), (x0 + x1) / 2,
+            (area.top + area.bottom) / 2 + (k - (lines.length - 1) / 2) * 16, x1 - x0 - 4);
+        });
+        ctx.restore();
+      });
+    } };
+    function draw(metric) {
+      pu.metric = metric;
+      pu.pressed(buttons, 'data-metric', metric);
+      var names = labels[metric], series = d[metric], datasets = [];
+      legend.textContent = '';
+      [[names[0], series.held, pu.colors.held], [names[1], series.used, pu.colors.used]].forEach(function (s) {
+        if (!s[0] || !s[1]) { return; }
+        var item = document.createElement('span'), sw = document.createElement('span');
+        sw.className = 'pu-sw';
+        sw.style.background = s[2];
+        item.appendChild(sw);
+        item.appendChild(document.createTextNode(s[0]));
+        legend.appendChild(item);
+        datasets.push({ label: s[0], data: s[1], backgroundColor: s[2], borderRadius: 4, borderSkipped: 'start' });
+      });
+      var used = series.used, known = used.filter(function (v) { return v !== null; });
+      if (known.length) {
+        var peak = used.indexOf(Math.max.apply(null, known));
+        summary.textContent = summaryText.replace('%(name)s', names[1])
+          .replace('%(total)s', format(metric, known.reduce(function (a, v) { return a + v; }, 0)))
+          .replace('%(days)s', known.length).replace('%(day)s', d.labels[peak]);
+      } else { summary.textContent = ''; }
+      pu.replaceChart('daily', document.getElementById('pu-daily-canvas-{{ uid }}'), {
+        type: 'bar', plugins: [bands],
+        data: { labels: d.labels, datasets: datasets },
+        options: {
+          maintainAspectRatio: false, animation: false,
+          interaction: { mode: 'index', intersect: false },
+          datasets: { bar: { categoryPercentage: .7, barPercentage: .9 } },
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: function (c) {
+              return c.dataset.label + ': ' + (c.raw === null ? '–' : format(metric, c.parsed.y));
+            } } } },
+          scales: { y: { beginAtZero: true, grid: { color: '#f0f0f0' },
+              ticks: { maxTicksLimit: 5, callback: function (v) { return format(metric, v); } } },
+            x: { grid: { display: false } } }
+        }
+      });
+    }
+    buttons.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-metric]');
+      if (b) { draw(b.getAttribute('data-metric')); }
+    });
+    // keep the chosen metric across refreshes and period changes
+    draw(d[pu.metric] ? pu.metric : 'cpu');
+  })();
+  </script>
+  {% endif %}
+  </div>
+</div>

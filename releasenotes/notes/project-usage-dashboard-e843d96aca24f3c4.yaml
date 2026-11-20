@@ -1,0 +1,20 @@
+---
+features:
+  - |
+    Add the Usage dashboard under Project > Telemetry: a monthly report of
+    what the current project's instances held (flavor size × hours
+    running) and used (CPU time, memory, network), plus volume and
+    snapshot GB-hours, as summary cards, a daily chart and a by-instance
+    table with CSV export. The report only covers the metrics the cloud
+    keeps: it says which range the totals cover, warns when the start of a
+    month was deleted, shows missing days as grey bands and locks months
+    entirely outside the retention. Instances in ERROR or SHUTOFF that hold
+    quota without running are listed from the Compute API. Every query is
+    limited to the current project, also for administrators, and results
+    are cached per project.
+upgrade:
+  - |
+    The Usage dashboard computes what a month covers from
+    ``GRIAN_PLUGIN['metrics_retention_days']`` (default 15): set it to the
+    Prometheus retention. Optionally override the low CPU use threshold
+    with ``GRIAN_PLUGIN['project_usage_thresholds']``.

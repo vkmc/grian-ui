@@ -1,0 +1,76 @@
+{% load i18n %}
+<div class="panel panel-default">
+  <div class="panel-heading">
+    <h3 class="panel-title"><i class="fa fa-table" aria-hidden="true"></i> {% trans "By instance" %}
+      {% if period and not locked %}<span class="pu-bounded">{% if period.complete %}{% blocktrans with month=period.label %}all instances that ran in {{ month }}{% endblocktrans %}{% else %}{% blocktrans with range=coverage.range %}instances that ran {{ range }} UTC{% endblocktrans %}{% endif %}</span>{% endif %}</h3>
+  </div>
+  {% if error_message %}
+  <div class="panel-body"><div data-pu-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}" style="margin: 0;"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "project/telemetry_usage/_retry.html" %}</div>
+  {% elif locked %}
+  <div class="panel-body"><p data-pu-nodata class="text-muted text-center" style="margin: 0;"><i class="fa fa-lock" aria-hidden="true"></i> {{ period.locked_reason }}</p></div>
+  {% else %}
+  <div class="table-responsive">
+    <table class="table table-hover pu-table" style="margin-bottom: 0;">
+      <thead>
+        <tr>
+          <th>{% trans "Instance" %}</th>
+          <th>{% trans "Flavor" %}</th>
+          <th class="text-right">{% trans "Hours running" %}</th>
+          <th class="text-right">{% trans "vCPU-hours held" %}</th>
+          <th class="text-right">{% trans "CPU-hours used" %}</th>
+          <th>{% trans "Use of held CPU" %}</th>
+          <th class="text-right">{% trans "RAM GB-hours held" %}</th>
+          <th class="text-right">{% trans "RAM GB-hours used" %}</th>
+          <th class="text-right">{% trans "Network in / out" %}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{% if row.url %}<a href="{{ row.url }}" class="pu-link" title="{{ row.id }}">{{ row.name }}</a>{% else %}<strong title="{{ row.id }}">{{ row.name }}</strong>{% endif %}
+            {% if row.deleted %} <span class="text-muted">({% trans "deleted" %})</span>{% elif row.status and row.status != "ACTIVE" %} <span class="text-muted">({{ row.status }})</span>{% endif %}</td>
+          <td>{{ row.flavor|default_if_none:"–" }}</td>
+          <td class="text-right">{{ row.shown.hours }}</td>
+          <td class="text-right">{{ row.shown.vcpu_hours }}</td>
+          <td class="text-right">{{ row.shown.cpu_hours }}</td>
+          <td>{% if row.cpu_ratio is None %}<span class="text-muted">{% trans "n/a" %}</span>{% else %}<span class="pu-ratio{% if row.cpu_low %} pu-low{% endif %}" aria-hidden="true"><span style="width: {{ row.cpu_bar|floatformat:'1u' }}%;"></span></span>{{ row.cpu_ratio_shown }}%{% if row.cpu_low %} <span class="text-muted">{% trans "low" %}</span>{% endif %}{% endif %}</td>
+          <td class="text-right">{{ row.shown.ram_gb_hours_held }}</td>
+          <td class="text-right">{{ row.shown.ram_gb_hours_used }}</td>
+          <td class="text-right">{{ row.shown.net_in }} / {{ row.shown.net_out }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="9" class="text-center pu-muted" style="padding: 20px;">{% trans "No instance ran in this period." %}</td></tr>
+        {% endfor %}
+      </tbody>
+      {% if rows %}
+      <tfoot>
+        <tr>
+          <td>{% trans "Total" %}</td>
+          <td></td>
+          <td class="text-right">{{ totals.shown.hours }}</td>
+          <td class="text-right">{{ totals.shown.vcpu_hours }}</td>
+          <td class="text-right">{{ totals.shown.cpu_hours }}</td>
+          <td>{% if totals.cpu_ratio_shown is not None %}{{ totals.cpu_ratio_shown }}%{% endif %}</td>
+          <td class="text-right">{{ totals.shown.ram_gb_hours_held }}</td>
+          <td class="text-right">{{ totals.shown.ram_gb_hours_used }}</td>
+          <td class="text-right">{{ totals.shown.net_in }} / {{ totals.shown.net_out }}</td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+  <div class="panel-footer pu-muted">
+    {% if data_stale %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "Could not be refreshed: showing the last data received." %}</p>{% endif %}
+    {% if data_old and not data_stale %}<p style="margin: 0 0 4px;"><i class="fa fa-refresh" aria-hidden="true"></i> {% trans "Refreshing: the data shown may be out of date." %}</p>{% endif %}
+    {% if servers_loading %}<p style="margin: 0 0 4px;"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading the instance list from the Compute service: names come from the metrics meanwhile." %}</p>{% include "project/telemetry_usage/_retry.html" %}
+    {% elif servers_failed %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "The instance list could not be loaded from the Compute service: names and sizes come from the metrics, and instances that hold quota without running are not shown." %}</p>
+    {% elif servers_stale %}<p class="text-warning" style="margin: 0 0 4px;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i> {% trans "The instance list could not be refreshed from the Compute service: showing the last one received." %}</p>{% endif %}
+    <i class="fa fa-info-circle" aria-hidden="true"></i> {% trans "Sorted by vCPU-hours held." %}
+    {% if not_listed %}{% trans "Not listed because they did not run in this period:" %}
+      <strong>{% for s in not_listed %}{{ s.name }} ({{ s.status }}){% if not forloop.last %}, {% endif %}{% endfor %}</strong>.
+      {% trans "They report no metrics, but they still hold quota; Nova's usage summary on Project → Overview counts them for their whole lifetime." %}{% endif %}
+    {% if thresholds %}{% blocktrans with low=thresholds.cpu_use_low %}Use of held CPU under {{ low }}% is low: the instance is probably oversized.{% endblocktrans %}{% endif %}
+  </div>
+  {% endif %}
+</div>

@@ -1,0 +1,86 @@
+{% load i18n %}
+{% if period %}{% include "project/telemetry_usage/_coverage.html" %}{% endif %}
+{% if error_message %}
+<div data-pu-nodata class="alert {% if loading %}alert-info{% else %}alert-danger{% endif %}"><i class="fa {% if loading %}fa-spinner fa-spin{% else %}fa-exclamation-circle{% endif %}" aria-hidden="true"></i> {{ error_message }}</div>
+{% include "project/telemetry_usage/_retry.html" %}
+{% elif locked %}
+<div data-pu-nodata class="alert alert-warning pu-alert"><i class="fa fa-lock" aria-hidden="true"></i> {% blocktrans with month=period.label reason=period.locked_reason %}{{ month }}: {{ reason }}.{% endblocktrans %}</div>
+{% else %}
+{% if period.incomplete %}
+<div class="alert alert-warning pu-alert"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
+  <strong>{% blocktrans with days=period.retention_days %}Incomplete month: metrics are kept for {{ days }} days.{% endblocktrans %}</strong>
+  {% blocktrans with lost=lost_range covered=coverage.days_covered total=coverage.days_total %}{{ lost }} and earlier months are no longer available, so these totals cover {{ covered }} of {{ total }} days.{% endblocktrans %}
+  {% trans "For complete monthly reports, ask your cloud operator to keep metrics longer or to keep daily totals. Export before the data ages out if you need it." %}</div>
+{% elif period.is_current and period.retention_days < 31 %}
+<div class="alert alert-info pu-alert"><i class="fa fa-database" aria-hidden="true"></i>
+  <strong>{% blocktrans with days=period.retention_days %}Metrics are kept for {{ days }} days.{% endblocktrans %}</strong>
+  {% blocktrans with days=period.retention_days %}A report run at the end of a month only covers its last {{ days }} days.{% endblocktrans %}</div>
+{% endif %}
+{% if not has_usage %}
+<div class="row pu-cards"><div class="col-md-12">
+  <div class="panel pu-card pu-grey"><div class="panel-heading">
+    <i class="fa fa-calendar-o pu-icon" aria-hidden="true"></i>
+    <div class="text-right" style="flex: 1;">
+      <div class="pu-value">–</div>
+      <div class="pu-label">{% trans "No usage in this period" %}</div>
+      <div class="pu-sub">{% trans "No instance or volume of this project reported metrics in the kept part of the period." %}</div>
+    </div>
+  </div></div>
+</div></div>
+{% else %}
+<div class="row pu-cards">
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pu-card"><div class="panel-heading">
+      <i class="fa fa-microchip pu-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="pu-value">{{ cards.cpu_used }}</div>
+        <div class="pu-label">{% trans "CPU-hours used" %}</div>
+        <div class="pu-sub">{% if cards.cpu_ratio is not None %}{% blocktrans with held=cards.cpu_held ratio=cards.cpu_ratio %}of {{ held }} vCPU-hours held ({{ ratio }}%){% endblocktrans %}{% else %}{% trans "no vCPU-hours held" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pu-card"><div class="panel-heading">
+      <i class="fa fa-server pu-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="pu-value">{{ cards.ram_used }}</div>
+        <div class="pu-label">{% trans "RAM GB-hours used" %}</div>
+        <div class="pu-sub">{% if cards.ram_ratio is not None %}{% blocktrans with held=cards.ram_held ratio=cards.ram_ratio %}of {{ held }} held ({{ ratio }}%){% endblocktrans %}{% else %}{% trans "no RAM held" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pu-card"><div class="panel-heading">
+      <i class="fa fa-exchange pu-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="pu-value">{{ cards.net_total }}</div>
+        <div class="pu-label">{% trans "Network traffic" %}</div>
+        <div class="pu-sub">{% blocktrans with i=cards.net_in o=cards.net_out %}{{ i }} in | {{ o }} out{% endblocktrans %}</div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-lg-3 col-md-6 col-sm-6">
+    <div class="panel pu-card"><div class="panel-heading">
+      <i class="fa fa-hdd-o pu-icon" aria-hidden="true"></i>
+      <div class="text-right" style="flex: 1;">
+        <div class="pu-value">{{ cards.storage }}</div>
+        <div class="pu-label">{% trans "Volume GB-hours" %}</div>
+        <div class="pu-sub">{% if totals.storage_gb_hours %}{% blocktrans with v=cards.volumes s=cards.snapshots %}{{ v }} volumes + {{ s }} snapshots{% endblocktrans %}{% else %}{% trans "no volumes" %}{% endif %}</div>
+      </div>
+    </div></div>
+  </div>
+</div>
+{% endif %}
+{% if fetched_ts %}
+{% if data_stale %}
+<div class="alert alert-warning" style="margin: 8px 0 0;"><i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
+  {% blocktrans %}Telemetry data could not be refreshed. Showing the last data received, from <span class="pu-clock" data-ts="{{ fetched_ts }}"></span>.{% endblocktrans %}</div>
+{% elif data_old %}
+<div class="alert alert-info" style="margin: 8px 0 0;"><i class="fa fa-refresh" aria-hidden="true"></i>
+  {% blocktrans %}Refreshing: the data shown may be out of date (from <span class="pu-clock" data-ts="{{ fetched_ts }}"></span>).{% endblocktrans %}</div>
+{% else %}
+<div class="pu-muted text-right" style="margin-top: 4px;">{% trans "Data from" %} <span class="pu-clock" data-ts="{{ fetched_ts }}"></span></div>
+{% endif %}
+<script>pu.showClocks(document.getElementById('pu-summary'));</script>
+{% endif %}
+{% endif %}

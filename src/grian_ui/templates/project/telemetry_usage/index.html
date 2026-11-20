@@ -1,0 +1,242 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load static %}
+{% block title %}{% trans "Usage" %}{% endblock %}
+
+{% block page_header %}
+  {% include "horizon/common/_page_header.html" with title=_("Usage") %}
+{% endblock page_header %}
+
+{% block main %}
+<!-- HTMX -->
+<script src="{% static 'vendor/htmx.js' %}"></script>
+<!-- Chart.js -->
+<script src="{% static 'vendor/chart.umd.js' %}"></script>
+
+<style>
+.pu-section { margin-bottom: 20px; }
+.pu-toolbar { margin-bottom: 15px; }
+.pu-muted { color: #595959; font-size: 12px; }
+.pu-loading { padding: 25px; text-align: center; color: #666; }
+.pu-card { border: 0; color: #fff; }
+.pu-card .panel-heading { display: flex; align-items: center; min-height: 110px; padding: 18px 15px; color: #fff; border: 0; border-radius: 3px; background: #337ab7; }
+.pu-card.pu-grey .panel-heading { background: #767676; }
+.pu-card .pu-icon { font-size: 3em; opacity: .3; margin-right: 15px; }
+.pu-card .pu-value { font-size: 2.3em; font-weight: 300; line-height: 1; margin-bottom: 4px; }
+.pu-card .pu-label { font-size: .95em; }
+.pu-card .pu-sub { font-size: .85em; margin-top: 3px; }
+/* summary cards: the same height in a row */
+#pu-root .pu-cards { display: flex; flex-wrap: wrap; }
+#pu-root .pu-cards::before, #pu-root .pu-cards::after { display: none; }
+#pu-root .pu-cards > [class*="col-"] { display: flex; }
+#pu-root .pu-cards .pu-card { flex: 1; display: flex; flex-direction: column; }
+#pu-root .pu-cards .pu-card .panel-heading { flex: 1; }
+/* pressed buttons: the theme's #e6e6e6 is 1.3:1 and equals the hover */
+#pu-root .btn-group .btn.active { background-color: #1a4f80; border-color: #1a4f80; color: #fff; font-weight: 600; }
+/* the default theme's .text-muted (#bbb) is 1.9:1 on white */
+#pu-root .text-muted { color: #595959; }
+#pu-root .text-warning { color: #6b4f1d; }
+#pu-root a.pu-link { color: #1a4f80; font-weight: 600; }
+.pu-bounded { font-size: 11px; color: #2b5a2b; background: #dff0d8; border-radius: 3px; padding: 1px 5px; margin-left: 6px; font-weight: normal; }
+.pu-table td, .pu-table th { vertical-align: middle !important; }
+.pu-table tfoot td { font-weight: 600; background: #fafafa; }
+/* use of held CPU: a bar plus the number */
+.pu-ratio { display: inline-block; width: 90px; height: 8px; background: #eee; border-radius: 4px; overflow: hidden; vertical-align: middle; margin-right: 6px; }
+.pu-ratio > span { display: block; height: 100%; border-radius: 0 4px 4px 0; background: #337ab7; }
+.pu-ratio.pu-low > span { background: #9bbbd9; }
+.pu-chart { position: relative; height: 240px; }
+.pu-legend { margin-bottom: 6px; }
+.pu-legend span { margin-right: 14px; white-space: nowrap; }
+.pu-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.pu-empty { padding: 35px 20px; text-align: center; color: #595959; }
+.pu-empty .fa { font-size: 3em; opacity: .4; display: block; margin-bottom: 10px; }
+.pu-alert { padding: 8px 12px; }
+/* how this page is calculated */
+.pu-how > summary { cursor: pointer; }
+.pu-how > summary .panel-title { display: inline; }
+.pu-how-table th, .pu-how-table td { padding: 3px 12px 3px 0; vertical-align: top; }
+.pu-how-table th[scope="row"] { white-space: nowrap; }
+</style>
+
+<script>
+window.pu = window.pu || {};
+pu.charts = pu.charts || {};
+// held: light, used: dark of the same hue (as the mockup and Top Consumers)
+pu.colors = { held: '#9bbbd9', used: '#337ab7', band: '#f2f2f2', bandText: '#595959' };
+pu.metric = pu.metric || 'cpu';
+pu.readJson = function (id) {
+  var el = document.getElementById(id);
+  return el ? JSON.parse(el.textContent) : null;
+};
+pu.formatBytes = function (v) {
+  var units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'], i = 0;
+  while (Math.abs(v) >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 || Math.abs(v) >= 100 ? Math.round(v) : +v.toFixed(1)) + ' ' + units[i];
+};
+pu.formatAmount = function (v) {
+  if (v === null || v === undefined) { return '–'; }
+  if (Math.abs(v) >= 100 || Number.isInteger(v)) { return Math.round(v).toLocaleString(); }
+  return v.toFixed(1);
+};
+pu.formatClock = function (ts) {
+  return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+pu.showClocks = function (root) {
+  root.querySelectorAll('.pu-clock').forEach(function (el) {
+    el.textContent = pu.formatClock(parseInt(el.getAttribute('data-ts'), 10));
+  });
+};
+pu.replaceChart = function (key, canvas, config) {
+  if (pu.charts[key]) { pu.charts[key].destroy(); }
+  pu.charts[key] = canvas ? new Chart(canvas, config) : null;
+};
+pu.destroyChart = function (key) {
+  if (pu.charts[key]) { pu.charts[key].destroy(); pu.charts[key] = null; }
+};
+pu.pressed = function (root, attr, value) {
+  root.querySelectorAll('button[' + attr + ']').forEach(function (b) {
+    var active = b.getAttribute(attr) === value;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+};
+// Change the period, then refresh every section.
+pu.setPeriod = function (key) {
+  document.getElementById('pu-period').value = key;
+  pu.pressed(document.getElementById('pu-period-buttons'), 'data-period', key);
+  var csv = document.getElementById('pu-csv');
+  csv.href = csv.getAttribute('data-base') + '?' + new URLSearchParams({ period: key }).toString();
+  htmx.trigger(document.body, 'pu-change');
+};
+pu.text = {
+  notRefreshed: '{% filter escapejs %}{% trans "Could not be refreshed: showing the last data received." %}{% endfilter %}',
+  notLoaded: '{% filter escapejs %}{% trans "Could not be loaded: trying again at the next refresh." %}{% endfilter %}'
+};
+// htmx keeps the old content when a request fails (5xx, network error):
+// say so in the section, until its next successful swap replaces it
+pu.markNotRefreshed = function (target, text) {
+  var note = target.querySelector(':scope > .pu-not-refreshed');
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'text-warning pu-not-refreshed';
+    note.style.margin = '0 0 6px';
+    target.insertBefore(note, target.firstChild);
+  }
+  note.textContent = '';
+  var icon = document.createElement('i');
+  icon.className = 'fa fa-exclamation-triangle';
+  icon.setAttribute('aria-hidden', 'true');
+  note.appendChild(icon);
+  note.appendChild(document.createTextNode(' ' + text));
+};
+['htmx:sendError', 'htmx:responseError'].forEach(function (name) {
+  document.body.addEventListener(name, function (e) {
+    var target = e.detail.target;
+    // expired session: Horizon answers 401 to AJAX requests
+    if (e.detail.xhr && e.detail.xhr.status === 401) { window.location.reload(); return; }
+    if (target && target.closest && target.closest('#pu-root')) {
+      pu.markNotRefreshed(target, target.querySelector('.pu-loading, [data-pu-nodata]') ?
+        pu.text.notLoaded : pu.text.notRefreshed);
+    }
+  });
+});
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') { htmx.trigger(document.body, 'pu-refresh'); }
+});
+</script>
+
+{% for message in error_messages %}
+<div class="alert alert-danger"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ message }}</div>
+{% endfor %}
+
+<div id="pu-root" hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
+<!-- Shared request parameters for the partials -->
+<form id="pu-controls" onsubmit="return false;">
+  <input type="hidden" name="period" id="pu-period" value="{{ default_period }}">
+</form>
+
+<div class="row pu-toolbar">
+  <div class="col-sm-8">
+    <div class="btn-group btn-group-sm" role="group" aria-label="{% trans 'Period' %}" id="pu-period-buttons">
+      {% for p in periods %}
+      {% if p.available %}
+      <button type="button" class="btn btn-default{% if p.key == default_period %} active{% endif %}"
+              data-period="{{ p.key }}" aria-pressed="{% if p.key == default_period %}true{% else %}false{% endif %}"
+              onclick="pu.setPeriod('{{ p.key }}')">{{ p.label }}</button>
+      {% else %}
+      <button type="button" class="btn btn-default" disabled title="{{ p.locked_reason }}"><i class="fa fa-lock" aria-hidden="true"></i> {{ p.label }}<span class="sr-only"> ({{ p.locked_reason }})</span></button>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <span class="pu-muted" style="margin-left: 8px;" id="pu-coverage" aria-live="polite"></span>
+  </div>
+  <div class="col-sm-4 text-right">
+    <a class="btn btn-sm btn-default" id="pu-csv" data-base="{% url 'horizon:project:telemetry_usage:csv' %}"
+       href="{% url 'horizon:project:telemetry_usage:csv' %}?period={{ default_period|urlencode }}" download><i class="fa fa-download" aria-hidden="true"></i> {% trans "Export CSV" %}</a>
+    <div class="pu-muted" style="margin-top: 4px;"><i class="fa fa-refresh" aria-hidden="true"></i>
+      {% blocktrans with minutes=refresh_minutes %}Refreshes every {{ minutes }} min{% endblocktrans %}</div>
+  </div>
+</div>
+
+<div class="alert alert-info pu-alert"><i class="fa fa-info-circle" aria-hidden="true"></i> <strong>{% trans "This is a usage report, not a bill." %}</strong>
+  {% trans "It shows what your instances held (flavor size × time) and what they actually used. Prices, if your cloud charges for use, come from its billing system." %}</div>
+
+<!-- 1. Retention notes and summary cards -->
+<div id="pu-summary" class="pu-section"
+     hx-get="{% url 'horizon:project:telemetry_usage:summary' %}"
+     hx-include="#pu-controls"
+     hx-sync="this:replace"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pu-refresh from:body, pu-retry, pu-change from:body"
+     hx-swap="innerHTML">
+  <div class="pu-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div>
+</div>
+
+<!-- 2. Daily usage -->
+<div id="pu-chart" class="pu-section"
+     hx-get="{% url 'horizon:project:telemetry_usage:chart' %}"
+     hx-include="#pu-controls"
+     hx-sync="this:replace"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pu-refresh from:body, pu-retry, pu-change from:body"
+     hx-swap="innerHTML">
+  <div class="panel panel-default"><div class="pu-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+</div>
+
+<!-- 3. By instance -->
+<div id="pu-table" class="pu-section"
+     hx-get="{% url 'horizon:project:telemetry_usage:table' %}"
+     hx-include="#pu-controls"
+     hx-sync="this:replace"
+     hx-trigger="load, every {{ refresh_seconds }}s [document.visibilityState === 'visible'], pu-refresh from:body, pu-retry, pu-change from:body"
+     hx-swap="innerHTML">
+  <div class="panel panel-default"><div class="pu-loading"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {% trans "Loading…" %}</div></div>
+</div>
+
+{% if thresholds and retention_days %}
+{# A native disclosure: keyboard and screen reader support without script. #}
+<details class="panel panel-default pu-section pu-how" id="pu-how">
+  <summary class="panel-heading"><h3 class="panel-title"><i class="fa fa-sliders" aria-hidden="true"></i> {% trans "How this page is calculated" %} <small class="text-muted">{% trans "(click to expand)" %}</small></h3></summary>
+  <div class="panel-body">
+    <table class="pu-how-table pu-muted">
+      <tr><th scope="col">{% trans "Column" %}</th><th scope="col">{% trans "Query (per instance, over the period)" %}</th></tr>
+      <tr><th scope="row">{% trans "Hours running" %}</th><td>{% blocktrans with step=step_minutes %}<code>count_over_time(ceilometer_vcpus{…}[…:{{ step }}m])</code> × {{ step }} minutes: the {{ step }}-minute steps in which the instance reported metrics.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "vCPU-hours held" %}</th><td>{% blocktrans with step=step_minutes %}<code>sum_over_time(ceilometer_vcpus{…}[…:{{ step }}m])</code> × {{ step }} minutes: the flavor's vCPUs for each step running.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "CPU-hours used" %}</th><td>{% blocktrans %}<code>increase(ceilometer_cpu{…}[…]) / 1e9 / 3600</code>: CPU time, all vCPUs together.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "RAM GB-hours held / used" %}</th><td>{% blocktrans with step=step_minutes %}<code>sum_over_time(ceilometer_memory{…}[…:{{ step }}m])</code> / <code>sum_over_time(ceilometer_memory_usage{…}[…:{{ step }}m])</code>, MiB ÷ 1024 × {{ step }} minutes.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Network in / out" %}</th><td>{% blocktrans %}<code>increase(ceilometer_network_{incoming,outgoing}_bytes[…])</code>, all interfaces of the instance.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Volume GB-hours" %}</th><td>{% blocktrans with step=step_minutes %}<code>sum_over_time(ceilometer_volume_size[…:{{ step }}m])</code> plus <code>ceilometer_volume_snapshot_size</code>, GiB × {{ step }} minutes.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Daily usage" %}</th><td>{% trans "The same queries per hour of the period, added up per UTC day." %}</td></tr>
+      <tr><th scope="row">{% trans "Period covered" %}</th><td>{% blocktrans %}From the later of: the start of the month, or the first full day still kept. Months are calendar months in UTC. Days before that are shown as not kept, never as zero.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Use of held CPU" %}</th><td>{% blocktrans with low=thresholds.cpu_use_low %}CPU-hours used ÷ vCPU-hours held. Under {{ low }}%: low, probably an oversized instance.{% endblocktrans %}</td></tr>
+      <tr><th scope="row">{% trans "Names, flavors, states" %}</th><td>{% trans "Compute API (your project's instance list, as on Project → Compute → Instances). Instances deleted since keep the name and size reported by their metrics." %}</td></tr>
+      <tr><th scope="row">{% trans "Source" %}</th><td>{% trans "Ceilometer (polled instance meters and volume meters), through sg-core, Prometheus and Aetos." %}</td></tr>
+    </table>
+    <p class="pu-muted" style="margin-top: 8px;">{% blocktrans with days=retention_days %}<strong>Retention.</strong> This cloud keeps metrics for {{ days }} days. Grian can't read the retention for project users: the Aetos status endpoint that reports it is limited to admins and services (<code>telemetry:status</code>), so the value comes from an operator setting (<code>GRIAN_PLUGIN['metrics_retention_days']</code>). A monthly report is complete only if retention is longer than a month, or if the operator keeps daily totals with recording rules.{% endblocktrans %}</p>
+    <p class="pu-muted" style="margin-top: 8px;">{% blocktrans %}<code>{…}</code> is your project plus <code>resource_name=~".+:instance-.+"</code>: only polled samples are used. Ceilometer also emits a notification sample per instance with a different <code>resource_name</code>; summing both would count every instance twice. Instances that never ran (ERROR) have no metrics and appear only in the note below the table.{% endblocktrans %}</p>
+    <p class="pu-muted" style="margin: 8px 0 0;">{% blocktrans %}The low-use threshold can be overridden in <code>local_settings</code> with <code>GRIAN_PLUGIN['project_usage_thresholds']</code>.{% endblocktrans %}</p>
+  </div>
+</details>
+{% endif %}
+
+</div>
+
+{% endblock %}

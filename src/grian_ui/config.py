@@ -215,3 +215,26 @@ def get_openstack_keystone_url():
 def get_openstack_endpoint_type():
     """Get OpenStack endpoint type (interface) from settings."""
     return getattr(settings, "OPENSTACK_ENDPOINT_TYPE", "publicURL")
+
+
+#: Default project Usage thresholds (percent): a "use of held CPU" below
+#: cpu_use_low is flagged as low (an oversized instance).
+DEFAULT_PROJECT_USAGE_THRESHOLDS = {"cpu_use_low": 10}
+
+
+def get_project_usage_thresholds():
+    """
+    Get the project Usage thresholds (percent).
+
+    Defaults (DEFAULT_PROJECT_USAGE_THRESHOLDS) can be overridden per key
+    with ``GRIAN_PLUGIN['project_usage_thresholds']``; every value is a
+    percentage below 100. See get_thresholds().
+
+    Raises:
+        ConfigurationError: If an override is unknown or out of range
+    """
+    return get_thresholds(
+        "project_usage_thresholds",
+        DEFAULT_PROJECT_USAGE_THRESHOLDS,
+        maximum=100,
+    )

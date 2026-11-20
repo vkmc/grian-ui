@@ -352,6 +352,13 @@ class PrometheusTelemetryClient(DatasourceClient):
             series.append((result.get("metric", {}), points))
         return series
 
+    # Project usage (queries in prometheus_project_usage) ----------------
+
+    def get_project_usage(self, request, start, end) -> dict:
+        from grian_ui.datasource import prometheus_project_usage
+
+        return prometheus_project_usage.get_usage(self, request, start, end)
+
 
 def get_client(request) -> DatasourceClient:
     """

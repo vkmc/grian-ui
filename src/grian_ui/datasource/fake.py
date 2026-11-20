@@ -99,6 +99,13 @@ class FakeTelemetryClient(DatasourceClient):
             },
         ]
 
+    # Project usage (sample data in fake_project_usage) ------------------
+
+    def get_project_usage(self, request, start, end) -> dict:
+        from grian_ui.datasource import fake_project_usage
+
+        return fake_project_usage.get_usage(start, end)
+
 
 def get_client(request=None) -> DatasourceClient:
     """

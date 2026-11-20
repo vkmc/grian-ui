@@ -61,3 +61,19 @@ class DatasourceClient(ABC):
     def get_capacity_predictions(self) -> list:
         """Get capacity predictions for storage pools."""
         pass
+
+    # Project usage (see grian_ui.project_usage) --------------------------
+
+    @abstractmethod
+    def get_project_usage(self, request, start, end) -> dict:
+        """
+        Get the usage report of the request's current project.
+
+        Args:
+            request: Django request (its current project is reported)
+            start, end: aware datetimes (UTC) of the covered range
+
+        Returns:
+            dict: see grian_ui.project_usage
+        """
+        pass
